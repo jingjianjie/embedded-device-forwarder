@@ -1,87 +1,87 @@
-# Embedded Device Forwarder
+# 嵌入式设备转发器
 
-A C#/.NET 8 daemon for ARM Linux (Raspberry Pi/Orange Pi) that provides a universal device forwarding solution. It bridges TCP connections from a host PC with serial ports on the embedded device, enabling transparent data forwarding using a custom binary framing protocol.
+一个运行在 ARM Linux（Raspberry Pi/Orange Pi）上的 C#/.NET 8 守护进程，提供通用的设备转发解决方案。它在主机 PC 的 TCP 连接与嵌入式设备的串口之间搭建桥梁，使用自定义的二进制帧协议实现透明的数据转发。
 
-## Features
+## 功能特性
 
-- **TCP Host Link**: Accepts multiple concurrent TCP connections from host clients
-- **Binary Framing Protocol**: Efficient, versioned protocol with magic bytes, channel routing, and variable-length payloads
-- **YAML Configuration**: Easy-to-edit configuration for channels and network settings
-- **Serial Port Management**: Automatic serial port handling with configurable baud rate, parity, stop bits, etc.
-- **Channel-based Routing**: Route data to specific serial ports using channel IDs (0-255)
-- **.NET Generic Host**: Built using .NET's Generic Host for proper lifecycle management
-- **Dependency Injection**: Clean architecture with DI for testability
-- **Comprehensive Logging**: Structured logging with configurable log levels
-- **ARM Linux Support**: Targets ARM architectures (arm, arm64) for Raspberry Pi, Orange Pi, and similar boards
+- **TCP 主机连接**：支持来自主机客户端的多个并发 TCP 连接
+- **二进制帧协议**：高效的版本化协议，包含魔术字节、通道路由和可变长度有效负载
+- **YAML 配置**：易于编辑的通道和网络设置配置
+- **串口管理**：自动处理串口，支持可配置的波特率、校验位、停止位等
+- **基于通道的路由**：使用通道 ID（0-255）将数据路由到特定串口
+- **.NET 通用主机**：使用 .NET 的通用主机构建，实现适当的生命周期管理
+- **依赖注入**：采用依赖注入的简洁架构，提高可测试性
+- **全面的日志记录**：结构化日志记录，支持可配置的日志级别
+- **ARM Linux 支持**：面向 ARM 架构（arm、arm64），适用于 Raspberry Pi、Orange Pi 等开发板
 
-## Protocol Specification
+## 协议规范
 
-### Frame Format
+### 帧格式
 
-| Field       | Size (bytes) | Description                              |
+| 字段        | 大小（字节） | 描述                                     |
 |-------------|--------------|------------------------------------------|
-| Magic       | 2            | Magic bytes (0xAA 0x55) - big-endian     |
-| Version     | 1            | Protocol version (currently 1)           |
-| MsgType     | 1            | Message type (see below)                 |
-| ChannelId   | 1            | Target channel ID (0-255)                |
-| PayloadLen  | 2            | Payload length (0-65535) - big-endian    |
-| Payload     | N            | Variable-length payload data             |
+| Magic       | 2            | 魔术字节（0xAA 0x55）- 大端序            |
+| Version     | 1            | 协议版本（当前为 1）                     |
+| MsgType     | 1            | 消息类型（见下表）                       |
+| ChannelId   | 1            | 目标通道 ID（0-255）                     |
+| PayloadLen  | 2            | 有效负载长度（0-65535）- 大端序          |
+| Payload     | N            | 可变长度的有效负载数据                   |
 
-### Message Types
+### 消息类型
 
-| Type           | Value | Description                              |
+| 类型           | 值    | 描述                                     |
 |----------------|-------|------------------------------------------|
-| Data           | 0x01  | Data frame for serial port forwarding    |
-| Ack            | 0x02  | Acknowledgment frame                     |
-| Error          | 0x03  | Error notification frame                 |
-| Heartbeat      | 0x04  | Connection keepalive                     |
-| ConfigQuery    | 0x05  | Request channel configuration            |
-| ConfigResponse | 0x06  | Channel configuration response           |
+| Data           | 0x01  | 串口转发的数据帧                         |
+| Ack            | 0x02  | 确认帧                                   |
+| Error          | 0x03  | 错误通知帧                               |
+| Heartbeat      | 0x04  | 连接保活                                 |
+| ConfigQuery    | 0x05  | 请求通道配置                             |
+| ConfigResponse | 0x06  | 通道配置响应                             |
 
-## Installation
+## 安装
 
-### Prerequisites
+### 前置要求
 
 - .NET 8 SDK
-- ARM Linux device (Raspberry Pi, Orange Pi, etc.) or x64 Linux/Windows for development
+- ARM Linux 设备（Raspberry Pi、Orange Pi 等）或用于开发的 x64 Linux/Windows
 
-### Building
+### 构建
 
 ```bash
-# Clone the repository
+# 克隆仓库
 git clone https://github.com/jingjianjie/embedded-device-forwarder.git
 cd embedded-device-forwarder
 
-# Build for ARM Linux (Raspberry Pi 32-bit)
+# 为 ARM Linux 构建（Raspberry Pi 32 位）
 dotnet publish src/DeviceForwarder.Daemon -c Release -r linux-arm --self-contained
 
-# Build for ARM64 Linux (Raspberry Pi 64-bit, Orange Pi)
+# 为 ARM64 Linux 构建（Raspberry Pi 64 位、Orange Pi）
 dotnet publish src/DeviceForwarder.Daemon -c Release -r linux-arm64 --self-contained
 
-# Build for current platform (development)
+# 为当前平台构建（开发用）
 dotnet build
 ```
 
-### Running Tests
+### 运行测试
 
 ```bash
 dotnet test
 ```
 
-## Configuration
+## 配置
 
-Create a `config.yaml` file in the application directory:
+在应用程序目录中创建 `config.yaml` 文件：
 
 ```yaml
-# TCP Host Link Configuration
+# TCP 主机连接配置
 host_link:
-  bind_address: "0.0.0.0"    # Listen on all interfaces
-  port: 5000                  # TCP port
-  max_connections: 10         # Max concurrent clients
+  bind_address: "0.0.0.0"    # 监听所有网络接口
+  port: 5000                  # TCP 端口
+  max_connections: 10         # 最大并发客户端数
   connection_timeout_seconds: 30
   heartbeat_interval_seconds: 10
 
-# Serial Channel Configuration
+# 串口通道配置
 channels:
   - id: 1
     name: "USB Serial 0"
@@ -98,25 +98,25 @@ channels:
     baudrate: 9600
     enabled: true
 
-# Logging
+# 日志
 log_level: "Information"  # Trace, Debug, Information, Warning, Error, Critical
 ```
 
-## Usage
+## 使用方法
 
-### Running the Daemon
+### 运行守护进程
 
 ```bash
-# Using default config.yaml in current directory
+# 使用当前目录的默认 config.yaml
 ./DeviceForwarder.Daemon
 
-# Using custom config file
+# 使用自定义配置文件
 ./DeviceForwarder.Daemon /path/to/config.yaml
 ```
 
-### Running as a systemd Service
+### 作为 systemd 服务运行
 
-Create `/etc/systemd/system/device-forwarder.service`:
+创建 `/etc/systemd/system/device-forwarder.service`：
 
 ```ini
 [Unit]
@@ -135,24 +135,24 @@ User=root
 WantedBy=multi-user.target
 ```
 
-Enable and start the service:
+启用并启动服务：
 
 ```bash
 sudo systemctl enable device-forwarder
 sudo systemctl start device-forwarder
 ```
 
-### Client Example (Python)
+### 客户端示例（Python）
 
 ```python
 import socket
 import struct
 
-# Connect to the forwarder
+# 连接到转发器
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.connect(('192.168.1.100', 5000))
 
-# Create a data frame for channel 1
+# 为通道 1 创建数据帧
 magic = 0xAA55
 version = 1
 msg_type = 0x01  # Data
@@ -160,16 +160,16 @@ channel_id = 1
 payload = b'Hello, Serial!'
 payload_len = len(payload)
 
-# Pack the frame (big-endian)
+# 打包帧（大端序）
 frame = struct.pack('>HBBBH', magic, version, msg_type, channel_id, payload_len) + payload
 
 sock.send(frame)
 
-# Receive response
+# 接收响应
 response = sock.recv(4096)
 ```
 
-## Project Structure
+## 项目结构
 
 ```
 embedded-device-forwarder/
@@ -178,47 +178,47 @@ embedded-device-forwarder/
 ├── src/
 │   └── DeviceForwarder.Daemon/
 │       ├── Configuration/
-│       │   ├── ChannelConfig.cs      # Serial channel settings
-│       │   ├── ConfigLoader.cs       # YAML configuration loader
-│       │   ├── ForwarderConfig.cs    # Root configuration
-│       │   └── HostLinkConfig.cs     # TCP settings
+│       │   ├── ChannelConfig.cs      # 串口通道设置
+│       │   ├── ConfigLoader.cs       # YAML 配置加载器
+│       │   ├── ForwarderConfig.cs    # 根配置
+│       │   └── HostLinkConfig.cs     # TCP 设置
 │       ├── Protocol/
-│       │   ├── Frame.cs              # Frame data structure
-│       │   ├── FrameCodec.cs         # Encode/decode logic
-│       │   └── MessageType.cs        # Message type enum
+│       │   ├── Frame.cs              # 帧数据结构
+│       │   ├── FrameCodec.cs         # 编码/解码逻辑
+│       │   └── MessageType.cs        # 消息类型枚举
 │       ├── Services/
-│       │   ├── ChannelManager.cs     # Serial port management
-│       │   ├── HostLinkService.cs    # TCP server
-│       │   └── SerialPortService.cs  # Serial port wrapper
-│       ├── Program.cs                # Application entry point
-│       ├── Worker.cs                 # Background service
-│       └── config.yaml               # Example configuration
+│       │   ├── ChannelManager.cs     # 串口管理
+│       │   ├── HostLinkService.cs    # TCP 服务器
+│       │   └── SerialPortService.cs  # 串口包装器
+│       ├── Program.cs                # 应用程序入口
+│       ├── Worker.cs                 # 后台服务
+│       └── config.yaml               # 配置示例
 └── tests/
     └── DeviceForwarder.Tests/
-        ├── ChannelConfigTests.cs     # Configuration tests
-        ├── ConfigLoaderTests.cs      # YAML loader tests
-        └── FrameCodecTests.cs        # Protocol codec tests
+        ├── ChannelConfigTests.cs     # 配置测试
+        ├── ConfigLoaderTests.cs      # YAML 加载器测试
+        └── FrameCodecTests.cs        # 协议编解码测试
 ```
 
-## Architecture
+## 架构
 
-The daemon uses .NET Generic Host with the following key components:
+该守护进程使用 .NET 通用主机，包含以下关键组件：
 
-1. **Worker**: Background service that orchestrates startup and shutdown
-2. **HostLinkService**: TCP server that accepts client connections and routes frames
-3. **ChannelManager**: Manages serial port instances for configured channels
-4. **SerialPortService**: Wraps individual serial ports with event-driven data reception
-5. **FrameCodec**: Encodes/decodes the binary framing protocol
+1. **Worker**：编排启动和关闭的后台服务
+2. **HostLinkService**：接受客户端连接并路由帧的 TCP 服务器
+3. **ChannelManager**：管理已配置通道的串口实例
+4. **SerialPortService**：使用事件驱动的数据接收包装各个串口
+5. **FrameCodec**：编码/解码二进制帧协议
 
-Data flow:
+数据流：
 ```
-Host Client <--TCP--> HostLinkService <--Frames--> ChannelManager <--Bytes--> SerialPortService <---> Serial Device
+主机客户端 <--TCP--> HostLinkService <--帧--> ChannelManager <--字节--> SerialPortService <---> 串口设备
 ```
 
-## License
+## 许可证
 
 MIT License
 
-## Contributing
+## 贡献
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+欢迎贡献！请随时提交 Pull Request。

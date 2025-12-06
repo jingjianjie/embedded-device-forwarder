@@ -161,9 +161,6 @@ payload = b'Hello, Serial!'
 payload_len = len(payload)
 
 # Pack the frame (big-endian)
-frame = struct.pack('>HBBBBH', magic >> 8 | (magic & 0xFF) << 8, version, 
-                    msg_type, channel_id, payload_len >> 8, payload_len & 0xFF)
-# Note: Use proper big-endian packing
 frame = struct.pack('>HBBBH', magic, version, msg_type, channel_id, payload_len) + payload
 
 sock.send(frame)

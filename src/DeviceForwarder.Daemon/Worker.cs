@@ -9,16 +9,16 @@ public sealed class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly IChannelManager _channelManager;
-    private readonly IHostLinkService _hostLinkService;
+    private readonly IHostLink _hostLink;
 
     public Worker(
         ILogger<Worker> logger,
         IChannelManager channelManager,
-        IHostLinkService hostLinkService)
+        IHostLink hostLink)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _channelManager = channelManager ?? throw new ArgumentNullException(nameof(channelManager));
-        _hostLinkService = hostLinkService ?? throw new ArgumentNullException(nameof(hostLinkService));
+        _hostLink = hostLink ?? throw new ArgumentNullException(nameof(hostLink));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -30,8 +30,8 @@ public sealed class Worker : BackgroundService
             // Open all configured serial channels
             _channelManager.OpenAllChannels();
 
-            // Start the TCP host link
-            await _hostLinkService.StartAsync(stoppingToken);
+            // Start the host link (TCP or USB Serial)
+            await _hostLink.StartAsync(stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -48,7 +48,7 @@ public sealed class Worker : BackgroundService
     {
         _logger.LogInformation("Device Forwarder Daemon stopping...");
         
-        await _hostLinkService.StopAsync();
+        await _hostLink.StopAsync();
         _channelManager.CloseAllChannels();
         
         await base.StopAsync(cancellationToken);

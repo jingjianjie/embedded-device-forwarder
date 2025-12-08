@@ -1,14 +1,25 @@
 # Device Forwarder Configuration
-# This file configures the TCP host link and serial channels
+# This file configures the host link and serial channels
 
-# TCP Host Link Configuration
+# Host Link Configuration
+# Supports two modes: "tcp" (network) or "usb" (USB virtual serial port)
 host_link:
+  # Link mode: "tcp" for TCP server, "usb" for USB virtual serial port
+  mode: "tcp"
+  
+  # TCP mode settings (used when mode is "tcp")
   # IP address to bind to (0.0.0.0 for all interfaces)
   bind_address: "0.0.0.0"
   # TCP port to listen on
   port: 5000
   # Maximum concurrent client connections
   max_connections: 10
+  
+  # USB mode settings (used when mode is "usb")
+  # USB serial device path (typically /dev/ttyGS0 for USB gadget mode)
+  usb_serial_device: "/dev/ttyGS0"
+  
+  # Common settings for both modes
   # Connection timeout in seconds
   connection_timeout_seconds: 30
   # Heartbeat interval in seconds (0 to disable)

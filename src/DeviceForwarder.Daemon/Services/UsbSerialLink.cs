@@ -52,7 +52,7 @@ public sealed class UsbSerialLink : IHostLink
                 StopBits = StopBits.One,
                 ReadTimeout = 1000,
                 WriteTimeout = 1000,
-                // Enable hardware flow control for more reliable communication
+                // No hardware flow control needed for USB virtual serial
                 Handshake = Handshake.None
             };
 
@@ -62,7 +62,7 @@ public sealed class UsbSerialLink : IHostLink
             // Subscribe to channel data events
             _channelManager.ChannelDataReceived += OnChannelDataReceived;
 
-            // Start reading frames from the serial port
+            // Start reading frames from the serial port in background
             _readTask = Task.Run(() => ReadFramesAsync(_cts.Token), _cts.Token);
         }
         catch (Exception ex)
@@ -71,8 +71,15 @@ public sealed class UsbSerialLink : IHostLink
             throw;
         }
 
-        // Keep the task running
-        await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+        // Wait for cancellation (like HostLinkService does)
+        try
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Normal shutdown
+        }
     }
 
     /// <inheritdoc />
@@ -251,7 +258,25 @@ public sealed class UsbSerialLink : IHostLink
     public void Dispose()
     {
         if (_disposed) return;
-        StopAsync().Wait();
+        
+        // Synchronous cleanup without blocking
+        _cts?.Cancel();
+        _channelManager.ChannelDataReceived -= OnChannelDataReceived;
+
+        if (_serialPort != null && _serialPort.IsOpen)
+        {
+            try
+            {
+                _serialPort.Close();
+                _serialPort.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error closing USB serial port during dispose");
+            }
+            _serialPort = null;
+        }
+
         _cts?.Dispose();
         _frameBuffer.Dispose();
         _disposed = true;

@@ -30,7 +30,20 @@ builder.Services.AddSingleton(config.HostLink);
 
 // Register services
 builder.Services.AddSingleton<IChannelManager, ChannelManager>();
-builder.Services.AddSingleton<IHostLinkService, HostLinkService>();
+
+// Register host link based on configuration mode
+var linkMode = config.HostLink.Mode?.ToLowerInvariant() ?? "tcp";
+if (linkMode == "usb")
+{
+    builder.Services.AddSingleton<IHostLink, UsbSerialLink>();
+    Console.WriteLine("Using USB Serial host link mode");
+}
+else
+{
+    builder.Services.AddSingleton<IHostLink>(sp => sp.GetRequiredService<IHostLinkService>());
+    builder.Services.AddSingleton<IHostLinkService, HostLinkService>();
+    Console.WriteLine("Using TCP host link mode");
+}
 
 // Register the worker
 builder.Services.AddHostedService<Worker>();

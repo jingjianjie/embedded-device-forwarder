@@ -11,19 +11,8 @@ namespace DeviceForwarder.Daemon.Services;
 /// <summary>
 /// Interface for the TCP host link service.
 /// </summary>
-public interface IHostLinkService : IDisposable
+public interface IHostLinkService : IHostLink
 {
-    /// <summary>
-    /// Starts listening for TCP connections.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    Task StartAsync(CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Stops the TCP listener.
-    /// </summary>
-    Task StopAsync();
-
     /// <summary>
     /// Broadcasts data to all connected clients for a specific channel.
     /// </summary>
@@ -52,6 +41,9 @@ public sealed class HostLinkService : IHostLinkService
 
     /// <inheritdoc />
     public int ConnectedClientCount => _clients.Count;
+
+    /// <inheritdoc />
+    public bool IsActive => _listener?.Server?.IsBound ?? false;
 
     public HostLinkService(
         HostLinkConfig config,
@@ -130,6 +122,13 @@ public sealed class HostLinkService : IHostLinkService
                 _logger.LogWarning(ex, "Failed to send to client {ClientId}", client.Id);
             }
         }
+    }
+
+    /// <inheritdoc />
+    public void SendToHost(byte channelId, byte[] data)
+    {
+        // For TCP link, this is the same as BroadcastToClients
+        BroadcastToClients(channelId, data);
     }
 
     private void HandleNewClient(TcpClient tcpClient)

@@ -182,4 +182,90 @@ channels:
         // Act & Assert
         Assert.Throws<FileNotFoundException>(() => ConfigLoader.LoadFromFile("/nonexistent/path/config.yaml"));
     }
+
+    [Fact]
+    public void LoadFromYaml_UsbMode_ReturnsCorrectConfig()
+    {
+        // Arrange
+        var yaml = @"
+host_link:
+  mode: ""usb""
+  usb_serial_device: ""/dev/ttyGS0""
+  connection_timeout_seconds: 60
+  heartbeat_interval_seconds: 15
+
+channels:
+  - id: 1
+    name: ""Test Channel""
+    device_path: ""/dev/ttyUSB0""
+    baudrate: 115200
+    enabled: true
+
+log_level: Information
+";
+
+        // Act
+        var config = ConfigLoader.LoadFromYaml(yaml);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("usb", config.HostLink.Mode);
+        Assert.Equal("/dev/ttyGS0", config.HostLink.UsbSerialDevice);
+        Assert.Equal(60, config.HostLink.ConnectionTimeoutSeconds);
+        Assert.Equal(15, config.HostLink.HeartbeatIntervalSeconds);
+        Assert.Single(config.Channels);
+    }
+
+    [Fact]
+    public void LoadFromYaml_TcpMode_ReturnsCorrectConfig()
+    {
+        // Arrange
+        var yaml = @"
+host_link:
+  mode: ""tcp""
+  bind_address: ""0.0.0.0""
+  port: 5000
+  max_connections: 10
+
+channels:
+  - id: 1
+    name: ""Test Channel""
+    device_path: ""/dev/ttyUSB0""
+    baudrate: 115200
+    enabled: true
+";
+
+        // Act
+        var config = ConfigLoader.LoadFromYaml(yaml);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("tcp", config.HostLink.Mode);
+        Assert.Equal("0.0.0.0", config.HostLink.BindAddress);
+        Assert.Equal(5000, config.HostLink.Port);
+        Assert.Equal(10, config.HostLink.MaxConnections);
+    }
+
+    [Fact]
+    public void LoadFromYaml_MissingMode_DefaultsToTcp()
+    {
+        // Arrange
+        var yaml = @"
+host_link:
+  bind_address: ""127.0.0.1""
+  port: 8080
+
+channels:
+  - id: 1
+    device_path: ""/dev/ttyUSB0""
+    baudrate: 115200
+";
+
+        // Act
+        var config = ConfigLoader.LoadFromYaml(yaml);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("tcp", config.HostLink.Mode);
+    }
 }

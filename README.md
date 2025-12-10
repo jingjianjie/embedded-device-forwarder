@@ -1,10 +1,12 @@
 # 嵌入式设备转发器
 
-一个运行在 ARM Linux（Raspberry Pi/Orange Pi）上的 C#/.NET 8 守护进程，提供通用的设备转发解决方案。它在主机 PC 的 TCP 连接与嵌入式设备的串口之间搭建桥梁，使用自定义的二进制帧协议实现透明的数据转发。
+一个运行在 ARM Linux（Raspberry Pi/Orange Pi）上的 C#/.NET 8 守护进程，提供通用的设备转发解决方案。它在主机 PC 与嵌入式设备的串口之间搭建桥梁，支持 TCP 和 USB 虚拟串口两种通信方式，使用自定义的二进制帧协议实现透明的数据转发。
 
 ## 功能特性
 
-- **TCP 主机连接**：支持来自主机客户端的多个并发 TCP 连接
+- **双模式主机连接**：支持 TCP 网络连接或 USB 虚拟串口（CDC ACM）连接
+  - **TCP 模式**：支持来自主机客户端的多个并发 TCP 连接
+  - **USB 模式**：通过 USB 线缆直接连接，适合便携式应用和现场调试
 - **二进制帧协议**：高效的版本化协议，包含魔术字节、通道路由和可变长度有效负载
 - **YAML 配置**：易于编辑的通道和网络设置配置
 - **串口管理**：自动处理串口，支持可配置的波特率、校验位、停止位等
@@ -70,12 +72,15 @@ dotnet test
 
 ## 配置
 
-在应用程序目录中创建 `config.yaml` 文件：
+在应用程序目录中创建 `config.yaml` 文件。支持两种主机连接模式：
+
+### TCP 模式配置（默认）
 
 ```yaml
-# TCP 主机连接配置
+# 主机连接配置 - TCP 模式
 host_link:
-  bind_address: "0.0.0.0"    # 监听所有网络接口
+  mode: "tcp"                 # 使用 TCP 网络连接
+  bind_address: "0.0.0.0"     # 监听所有网络接口
   port: 5000                  # TCP 端口
   max_connections: 10         # 最大并发客户端数
   connection_timeout_seconds: 30
@@ -101,6 +106,31 @@ channels:
 # 日志
 log_level: "Information"  # Trace, Debug, Information, Warning, Error, Critical
 ```
+
+### USB 虚拟串口模式配置
+
+```yaml
+# 主机连接配置 - USB 模式
+host_link:
+  mode: "usb"                      # 使用 USB 虚拟串口连接
+  usb_serial_device: "/dev/ttyGS0" # USB gadget 设备路径
+  connection_timeout_seconds: 30
+  heartbeat_interval_seconds: 10
+
+# 串口通道配置（与 TCP 模式相同）
+channels:
+  - id: 1
+    name: "Sensor"
+    device_path: "/dev/ttyUSB0"
+    baudrate: 115200
+    enabled: true
+
+# 日志
+log_level: "Information"
+```
+
+> 📖 **USB 模式设置**：USB 虚拟串口模式需要在开发板上配置 USB gadget。详细设置步骤请参阅 [USB_SERIAL_SETUP.md](docs/USB_SERIAL_SETUP.md)。
+
 
 ## 使用方法
 
@@ -181,14 +211,16 @@ embedded-device-forwarder/
 │       │   ├── ChannelConfig.cs      # 串口通道设置
 │       │   ├── ConfigLoader.cs       # YAML 配置加载器
 │       │   ├── ForwarderConfig.cs    # 根配置
-│       │   └── HostLinkConfig.cs     # TCP 设置
+│       │   └── HostLinkConfig.cs     # 主机连接设置（TCP/USB）
 │       ├── Protocol/
 │       │   ├── Frame.cs              # 帧数据结构
 │       │   ├── FrameCodec.cs         # 编码/解码逻辑
 │       │   └── MessageType.cs        # 消息类型枚举
 │       ├── Services/
 │       │   ├── ChannelManager.cs     # 串口管理
-│       │   ├── HostLinkService.cs    # TCP 服务器
+│       │   ├── IHostLink.cs          # 主机连接接口
+│       │   ├── HostLinkService.cs    # TCP 服务器实现
+│       │   ├── UsbSerialLink.cs      # USB 虚拟串口实现
 │       │   └── SerialPortService.cs  # 串口包装器
 │       ├── Program.cs                # 应用程序入口
 │       ├── Worker.cs                 # 后台服务
@@ -205,14 +237,21 @@ embedded-device-forwarder/
 该守护进程使用 .NET 通用主机，包含以下关键组件：
 
 1. **Worker**：编排启动和关闭的后台服务
-2. **HostLinkService**：接受客户端连接并路由帧的 TCP 服务器
+2. **IHostLink 接口**：定义主机连接抽象层
+   - **HostLinkService**：TCP 服务器实现，支持多个并发客户端
+   - **UsbSerialLink**：USB 虚拟串口实现，通过 USB CDC ACM 连接
 3. **ChannelManager**：管理已配置通道的串口实例
 4. **SerialPortService**：使用事件驱动的数据接收包装各个串口
 5. **FrameCodec**：编码/解码二进制帧协议
 
-数据流：
+数据流（TCP 模式）：
 ```
 主机客户端 <--TCP--> HostLinkService <--帧--> ChannelManager <--字节--> SerialPortService <---> 串口设备
+```
+
+数据流（USB 模式）：
+```
+主机客户端 <--USB--> UsbSerialLink <--帧--> ChannelManager <--字节--> SerialPortService <---> 串口设备
 ```
 
 ## 许可证

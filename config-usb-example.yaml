@@ -1,0 +1,62 @@
+# Device Forwarder Configuration - USB Serial Mode Example
+# This example shows how to configure the forwarder to use USB virtual serial port
+
+# Host Link Configuration - USB Mode
+host_link:
+  # Use USB virtual serial port (CDC ACM) instead of TCP
+  mode: "usb"
+  
+  # USB serial device path (created by USB gadget)
+  # Typically /dev/ttyGS0 for the first USB gadget serial port
+  usb_serial_device: "/dev/ttyGS0"
+  
+  # Connection timeout in seconds
+  connection_timeout_seconds: 30
+  
+  # Heartbeat interval in seconds (0 to disable)
+  heartbeat_interval_seconds: 10
+
+# Serial Channel Configuration
+# These are the downstream devices connected to the forwarder
+channels:
+  # Example: USB-to-Serial adapter
+  - id: 1
+    name: "Sensor Module"
+    device_path: "/dev/ttyUSB0"
+    baudrate: 115200
+    data_bits: 8
+    parity: "None"
+    stop_bits: "One"
+    enabled: true
+
+  # Example: Built-in UART
+  - id: 2
+    name: "Control Board"
+    device_path: "/dev/ttyAMA0"
+    baudrate: 9600
+    data_bits: 8
+    parity: "None"
+    stop_bits: "One"
+    enabled: true
+
+  # Example: Another USB serial device
+  - id: 3
+    name: "Camera Module"
+    device_path: "/dev/ttyUSB1"
+    baudrate: 38400
+    data_bits: 8
+    parity: "Even"
+    stop_bits: "One"
+    enabled: false
+
+# Logging configuration
+log_level: "Information"  # Trace, Debug, Information, Warning, Error, Critical
+
+# Notes:
+# 1. Before using USB mode, you must configure USB gadget on the device
+#    See docs/USB_SERIAL_SETUP.md for detailed instructions
+# 2. The USB serial device path (/dev/ttyGS0) is created by the USB gadget driver
+# 3. On the PC side, the device will appear as /dev/ttyACM0 (Linux), 
+#    COM port (Windows), or /dev/cu.usbmodem* (macOS)
+# 4. USB mode only supports a single host connection, unlike TCP mode
+#    which supports multiple concurrent connections

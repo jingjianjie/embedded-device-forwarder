@@ -1,0 +1,91 @@
+{
+    "ports": [
+        {
+            "name": "UART1",
+            "type": "tty",
+            "use_frame":true,
+            "tty": {
+                "path": "/tmp/ttyV0",
+                "baudrate": 115200,
+                "databits": 8,
+                "stopbits": 1,
+                "parity": 0,
+                "flow": 0
+            }
+        },
+        {
+            "name": "USB_CDC",
+            "type": "tty",
+            "use_frame":false,
+            "tty": {
+                "path": "/tmp/ttyV2",
+                "baudrate": 115200,
+                "databits": 8,
+                "stopbits": 1,
+                "parity": 0,
+                "flow": 0
+            }
+        },
+        {
+            "name": "UART2",
+            "type": "tty",
+            "use_frame":false,
+            "tty": {
+                "path": "/tmp/ttyV4",
+                "baudrate": 9600,
+                "databits": 8,
+                "stopbits": 1,
+                "parity": 0,
+                "flow": 0
+            }
+        },
+        {
+            "name": "NET0",
+            "type": "tcp_server",
+            "use_frame":false,
+            "tcp_server": {
+                "bind": "0.0.0.0",
+                "port": 9000,
+                "backlog": 5
+            }
+        }
+    ],
+
+    "plugins": [
+        {
+            "name": "filter",
+            "path": "/home/aniston/Desktop/ez_router/plugins/filter.so"
+        },
+        {
+            "name": "codec",
+            "path": "/home/aniston/Desktop/ez_router/plugins/codec.so"
+        }
+    ],
+
+    "routes": [
+        {
+            "src": "UART1",
+            "dst": "USB_CDC",
+            "plugin": "filter",
+            "handler": "filter.uart_to_usb"
+        },
+        {
+            "src": "USB_CDC",
+            "dst": "UART1",
+            "plugin": "filter",
+            "handler": "filter.usb_to_uart"
+        },
+        {
+            "src": "NET0",
+            "dst": "UART1",
+            "plugin": "codec",
+            "handler": "codec.decode"
+        },
+        {
+            "src": "UART1",
+            "dst": "NET0",
+            "plugin": "codec",
+            "handler": "codec.encode"
+        }
+    ]
+}

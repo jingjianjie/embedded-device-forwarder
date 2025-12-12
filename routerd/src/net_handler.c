@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include "log.h"
 
 static void set_nonblock(int fd)
 {
@@ -57,7 +58,7 @@ int net_udp_create(int port)
 
     set_nonblock(fd);
 
-    printf("[NET] UDP listening on port %d, fd=%d\n", port, fd);
+    LOG_INFO("[NET] UDP listening on port %d, fd=%d\n", port, fd);
     return fd;
 }
 
@@ -72,7 +73,7 @@ void net_handle_tcp(int fd)
     ev.len = n;
     memcpy(ev.data, buf, n);
 
-    printf("[NET] TCP received %d bytes\n", n);
+    LOG_INFO("[NET] TCP received %d bytes\n", n);
     queue_push(&ev);
 }
 
@@ -90,6 +91,6 @@ void net_handle_udp(int fd)
     ev.len = n;
     memcpy(ev.data, buf, n);
 
-    printf("[NET] UDP received %d bytes\n", n);
+    LOG_INFO("[NET] UDP received %d bytes\n", n);
     queue_push(&ev);
 }

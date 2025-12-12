@@ -19,6 +19,8 @@ SRCS = src/ez_routerd.c \
 	src/config_store.c \
 	src/plugin_loader.c \
 	src/port_manager.c \
+	src/log.c \
+	src/run_state.c \
 # 	src/uart_handler.c 
 # 	src/forward.c \
 

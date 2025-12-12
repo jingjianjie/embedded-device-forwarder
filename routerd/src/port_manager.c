@@ -8,7 +8,9 @@
 #include <arpa/inet.h>
 
 #include "port_manager.h"
+#include "log.h"
 
+port_entry_t g_port_table[MAX_PORTS];//define ports
 // ========================================================
 //  打开 TTY 端口 (/dev/ttyS0, /dev/ttyUSB0, /dev/ttyACM0, /dev/ttyGS0...)
 // ========================================================
@@ -84,7 +86,11 @@ static int port_open_tcp_server(port_def_t* p)
         return -1;
     }
 
-    listen(fd, p->cfg.tcp_server.backlog);
+    if(listen(fd, p->cfg.tcp_server.backlog)<0){
+        perror("[Tcp server] listen");
+        close(fd);
+    }
+    LOG_INFO("listen %s \n",p->cfg.tcp_server);
     return fd;
 }
 
@@ -151,6 +157,7 @@ int port_open_single(port_def_t* p)
             break;
         case PORT_TCP_SERVER:
             fd = port_open_tcp_server(p);
+            LOG_INFO("port_open_tcp_server\n");
             break;
         case PORT_TCP_CLIENT:
             fd = port_open_tcp_client(p);
@@ -162,14 +169,14 @@ int port_open_single(port_def_t* p)
             fd = port_open_usb(p);
             break;
         default:
-            printf("[port] unknown type %d\n", p->base.type);
+            LOG_INFO("[port] unknown type %d\n", p->base.type);
             return -1;
     }
 
     if (fd >= 0) {
         p->base.fd = fd;
         // reactor_add_fd(fd);
-        printf("[port] opened %s (fd=%d)\n", p->base.name, fd);
+        LOG_INFO("[port] opened %s (fd=%d)\n", p->base.name, fd);
     }
 
     return fd;
@@ -282,3 +289,39 @@ int port_send(port_def_t* p, const uint8_t* data, int len)
             return -1;
     }
 }
+
+
+
+port_def_t* port_find(const char* name)
+{
+    if (!name) return NULL;
+
+    for (int i = 0; i < MAX_PORTS; i++) {
+        if (!g_port_table[i].used)
+            continue;
+
+        port_def_t* port = g_port_table[i].port;
+        if (!port)
+            continue;
+
+        if (strcmp(port->base.name, name) == 0) {
+            if (port->base.type == PORT_TCP_SERVER)
+                continue;
+            else
+                return port;
+        }
+    }
+
+    return NULL;
+}
+
+
+
+// port_def_t* reactor_find_port(int fd)
+// {
+//     for (int i = 0; i < MAX_REACTOR_PORTS; i++) {
+//         if (g_reactor_table[i].used && g_reactor_table[i].fd == fd)
+//             return g_reactor_table[i].port;
+//     }
+//     return NULL;
+// }

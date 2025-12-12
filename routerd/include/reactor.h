@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "config_store.h"
+#include "port_manager.h"
 
 #define MAX_REACT_FDS 64
 
@@ -28,13 +29,17 @@ void reactor_unlock();
 
 typedef int (*handler_t)(uint8_t* data,int len);
 void reactor_add_fd(int fd);
-typedef struct{
-	int fd;
-	handler_t handler;
-}reactor_entry_t;
+
+// typedef struct{
+// 	int used;
+// 	int fd;
+// 	port_def*t port;
+// }reactor_entry_t;
 
 void reactor_add_port(port_def_t* port);
 
-extern reactor_entry_t reactor_table[MAX_REACT_FDS];
+// port_def_t* reactor_find_port(int fd);
+
+// extern reactor_entry_t reactor_table[MAX_REACT_FDS];
 
 #endif

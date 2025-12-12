@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <dlfcn.h>
+#include "log.h"
 
 
 static handler_entry_t g_handlers[MAX_HANDLERS];
@@ -21,7 +22,7 @@ void plugin_register_handler(
 
     g_handlers[g_handler_count].func = func;
 
-    printf("[plugin] register handler: %s -> %p\n",
+    LOG_INFO("[plugin] register handler: %s -> %p\n",
            g_handlers[g_handler_count].full_name, func);
 
     g_handler_count++;
@@ -40,9 +41,9 @@ void plugin_list_handlers()
 {
     printf("=== Registered Handlers ===\n");
     for (int i = 0; i < g_handler_count; ++i) {
-        printf("%s -> %p\n", g_handlers[i].full_name, g_handlers[i].func);
+        LOG_INFO("%s -> %p\n", g_handlers[i].full_name, g_handlers[i].func);
     }
-    printf("===========================\n");
+    LOG_INFO("===========================\n");
 }
 
 
@@ -50,11 +51,11 @@ int plugin_load(const char* path)
 {
     void* handle = dlopen(path, RTLD_NOW);
     if (!handle) {
-        printf("dlopen error: %s\n", dlerror());
+        LOG_ERROR("dlopen error: %s\n", dlerror());
         return -1;
     }
 
-    printf("[plugin] loaded %s\n", path);
+    LOG_INFO("[plugin] loaded %s\n", path);
     // plugin_list_handlers();  // 展示目前所有插件注册的函数
 
     return 0;

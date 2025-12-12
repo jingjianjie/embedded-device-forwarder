@@ -6,21 +6,23 @@
 // #include "forward.h"
 // #include "config_store.h"
 #include "port_manager.h"
-
+#include "log.h"
 void router_core_handle(event_msg_t* msg)
 {
     if (!msg) return;
 
-    port_def_t* dst = config_find_port(msg->dst);
+    LOG_INFO("[router] enter routers and get port");
+    port_def_t* dst = port_find(msg->dst);
+    LOG_INFO("[router] find port success");
     if (!dst) {
-        printf("[router] ERROR: dst port '%s' not found\n", msg->dst);
+        LOG_ERROR("[router] ERROR: dst port '%s' not found\n", msg->dst);
         return;
     }
 
-    printf("[router] write data to %s\n", msg->dst);
+    LOG_INFO("[router] write data to %s\n", msg->dst);
 
     int w = port_send(dst, msg->data, msg->len);
     if (w < 0) {
-        printf("[router] ERROR: send failed on %s\n", msg->dst);
+        LOG_ERROR("[router] ERROR: send failed on %s\n", msg->dst);
     }
 }

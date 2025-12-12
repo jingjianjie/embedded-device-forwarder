@@ -54,11 +54,11 @@
     "plugins": [
         {
             "name": "filter",
-            "path": "/home/aniston/Desktop/ez_router/plugins/filter.so"
+            "path": "plugin/filter.so"
         },
         {
             "name": "codec",
-            "path": "/home/aniston/Desktop/ez_router/plugins/codec.so"
+            "path": "plugins/codec.so"
         }
     ],
 

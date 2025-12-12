@@ -26,4 +26,14 @@ int port_get_fd_by_name(const char* name);
 int port_send(port_def_t* p, const uint8_t* data, int len);
 
 
+// #define MAX_PORTS 128
+typedef struct{
+	int used;
+	int fd;
+	port_def_t* port;
+}port_entry_t;
+
+extern port_entry_t g_port_table[MAX_PORTS];
+
+port_def_t* port_find(const char* name);
 #endif

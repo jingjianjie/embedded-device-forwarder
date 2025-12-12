@@ -3,6 +3,7 @@
 #include <string.h>
 #include "config_store.h"
 #include "cJSON.h"
+#include "log.h"
 
 config_t g_config;
 // 安全读取字符串字段
@@ -39,7 +40,7 @@ static void clear_config()
 port_def_t* config_find_port(const char* name)
 {
     if (!name || name[0] == '\0') {
-        printf("[config] ERROR: config_find_port: name is NULL\n");
+        LOG_INFO("[config] ERROR: config_find_port: name is NULL\n");
         return NULL;
     }
 
@@ -80,7 +81,7 @@ int config_find_plugin(const char* name)
 static void parse_ports(cJSON* arr)
 {
     if (!arr || !cJSON_IsArray(arr)) {
-        printf("[config] ERROR: ports missing or not array\n");
+        LOG_INFO("[config] ERROR: ports missing or not array\n");
         return;
     }
 
@@ -118,7 +119,7 @@ static void parse_ports(cJSON* arr)
             cJSON* tty = cJSON_GetObjectItem(item, "tty");
 
             if (!tty) {
-                printf("[config] ERROR: tty config missing for %s\n", p->base.name);
+                LOG_INFO("[config] ERROR: tty config missing for %s\n", p->base.name);
                 continue;
             }
 
@@ -162,7 +163,7 @@ static void parse_ports(cJSON* arr)
             GET_STR(u, "path", p->cfg.usb.path);
         }
         else {
-            printf("[config] ERROR: unknown port type: %s\n", type_str);
+            LOG_INFO("[config] ERROR: unknown port type: %s\n", type_str);
         }
 
         p->base.fd = -1; // runtime use
@@ -174,7 +175,7 @@ static void parse_ports(cJSON* arr)
 static void parse_plugins(cJSON* arr)
 {
     if (!arr || !cJSON_IsArray(arr)) {
-        printf("[config] plugins missing or invalid\n");
+        LOG_ERROR("[config] plugins missing or invalid\n");
         return;
     }
 
@@ -184,7 +185,7 @@ static void parse_plugins(cJSON* arr)
     cJSON_ArrayForEach(item, arr) {
 
         if (g_config.plugin_count >= MAX_PLUGINS) {
-            printf("[config] too many plugins\n");
+            LOG_ERROR("[config] too many plugins\n");
             break;
         }
 
@@ -199,7 +200,7 @@ static void parse_plugins(cJSON* arr)
 static void parse_routes(cJSON* arr)
 {
     if (!arr || !cJSON_IsArray(arr)) {
-        printf("[config] routes missing or invalid\n");
+        LOG_ERROR("[config] routes missing or invalid\n");
         return;
     }
 
@@ -209,7 +210,7 @@ static void parse_routes(cJSON* arr)
     cJSON_ArrayForEach(item, arr) {
 
         if (g_config.route_count >= MAX_ROUTES) {
-            printf("[config] too many routes\n");
+            LOG_ERROR("[config] too many routes\n");
             break;
         }
 
@@ -247,18 +248,18 @@ int load_config(const char* filename)
     free(text);
 
     if (!root) {
-        printf("config parse error\n");
+        LOG_ERROR("config parse error\n");
         return -1;
     }
 
-    printf("[config] before parse!\n");
+    LOG_INFO("[config] before parse!\n");
     parse_ports(cJSON_GetObjectItem(root, "ports"));
     parse_plugins(cJSON_GetObjectItem(root, "plugins"));
     parse_routes(cJSON_GetObjectItem(root, "routes"));
 
     cJSON_Delete(root);
 
-    printf("[config] loaded: %d ports, %d plugins, %d routes\n",
+    LOG_INFO("[config] loaded: %d ports, %d plugins, %d routes\n",
         g_config.port_count,
         g_config.plugin_count,
         g_config.route_count);
@@ -345,7 +346,7 @@ case PORT_USB: {
 }
 
 default:
-    printf("[config] WARNING: unknown port type %d\n", p->base.type);
+    LOG_INFO("[config] WARNING: unknown port type %d\n", p->base.type);
     break;
 }
 }
@@ -418,82 +419,82 @@ int config_find_routes_by_src(
 
 void config_print()
 {
-    printf("\n================ CONFIG DUMP ================\n");
+    LOG_INFO("\n================ CONFIG DUMP ================\n");
 
     /* ----------- PORTS ----------- */
-    printf("\n[PORTS] count = %d\n", g_config.port_count);
+    LOG_INFO("\n[PORTS] count = %d\n", g_config.port_count);
 
     for (int i = 0; i < g_config.port_count; i++) {
 
         port_def_t* p = &g_config.ports[i];
-        printf("  [%d]\n", i);
-        printf("    name : %s\n", p->base.name);
-        printf("    use_frame: %d\n",p->base.use_frame);
-        printf("    type : ");
+        LOG_INFO("  [%d]\n", i);
+        LOG_INFO("    name : %s\n", p->base.name);
+        LOG_INFO("    use_frame: %d\n",p->base.use_frame);
+        LOG_INFO("    type : ");
 
         switch (p->base.type)
         {
             case PORT_TTY:
-                printf("tty\n");
-                printf("      path      : %s\n", p->cfg.tty.path);
-                printf("      baudrate  : %d\n", p->cfg.tty.baudrate);
-                printf("      databits  : %d\n", p->cfg.tty.databits);
-                printf("      stopbits  : %d\n", p->cfg.tty.stopbits);
-                printf("      parity    : %d\n", p->cfg.tty.parity);
-                printf("      flow      : %d\n", p->cfg.tty.flow);
+                LOG_INFO("tty\n");
+                LOG_INFO("      path      : %s\n", p->cfg.tty.path);
+                LOG_INFO("      baudrate  : %d\n", p->cfg.tty.baudrate);
+                LOG_INFO("      databits  : %d\n", p->cfg.tty.databits);
+                LOG_INFO("      stopbits  : %d\n", p->cfg.tty.stopbits);
+                LOG_INFO("      parity    : %d\n", p->cfg.tty.parity);
+                LOG_INFO("      flow      : %d\n", p->cfg.tty.flow);
                 break;
 
             case PORT_TCP_SERVER:
-                printf("tcp_server\n");
-                printf("      bind      : %s\n", p->cfg.tcp_server.bind_addr);
-                printf("      port      : %d\n", p->cfg.tcp_server.port);
-                printf("      backlog   : %d\n", p->cfg.tcp_server.backlog);
+                LOG_INFO("tcp_server\n");
+                LOG_INFO("      bind      : %s\n", p->cfg.tcp_server.bind_addr);
+                LOG_INFO("      port      : %d\n", p->cfg.tcp_server.port);
+                LOG_INFO("      backlog   : %d\n", p->cfg.tcp_server.backlog);
                 break;
 
             case PORT_TCP_CLIENT:
-                printf("tcp_client\n");
-                printf("      addr      : %s\n", p->cfg.tcp_client.addr);
-                printf("      port      : %d\n", p->cfg.tcp_client.port);
+                LOG_INFO("tcp_client\n");
+                LOG_INFO("      addr      : %s\n", p->cfg.tcp_client.addr);
+                LOG_INFO("      port      : %d\n", p->cfg.tcp_client.port);
                 break;
 
             case PORT_UDP:
-                printf("udp\n");
-                printf("      bind      : %s\n", p->cfg.udp.bind_addr);
-                printf("      port      : %d\n", p->cfg.udp.port);
+                LOG_INFO("udp\n");
+                LOG_INFO("      bind      : %s\n", p->cfg.udp.bind_addr);
+                LOG_INFO("      port      : %d\n", p->cfg.udp.port);
                 break;
 
             case PORT_USB:
-                printf("usb\n");
-                printf("      path      : %s\n", p->cfg.usb.path);
+                LOG_INFO("usb\n");
+                LOG_INFO("      path      : %s\n", p->cfg.usb.path);
                 break;
 
             default:
-                printf("UNKNOWN(%d)\n", p->base.type);
+                LOG_INFO("UNKNOWN(%d)\n", p->base.type);
                 break;
         }
 
-        printf("    fd : %d\n", p->base.fd);
+        LOG_INFO("    fd : %d\n", p->base.fd);
     }
 
     /* ----------- PLUGINS ----------- */
-    printf("\n[PLUGINS] count = %d\n", g_config.plugin_count);
+    LOG_INFO("\n[PLUGINS] count = %d\n", g_config.plugin_count);
     for (int i = 0; i < g_config.plugin_count; i++) {
         plugin_def_t* p = &g_config.plugins[i];
-        printf("  [%d]\n", i);
-        printf("    name : %s\n", p->name);
-        printf("    path : %s\n", p->path);
+        LOG_INFO("  [%d]\n", i);
+        LOG_INFO("    name : %s\n", p->name);
+        LOG_INFO("    path : %s\n", p->path);
     }
 
     /* ----------- ROUTES ----------- */
-    printf("\n[ROUTES] count = %d\n", g_config.route_count);
+    LOG_INFO("\n[ROUTES] count = %d\n", g_config.route_count);
     for (int i = 0; i < g_config.route_count; i++) {
         route_def_t* r = &g_config.routes[i];
-        printf("  [%d]\n", i);
-        printf("    src     : %s\n", r->src);
-        printf("    dst     : %s\n", r->dst);
-        printf("    plugin  : %s\n", r->plugin);
-        printf("    handler : %s\n", r->handler);
+        LOG_INFO("  [%d]\n", i);
+        LOG_INFO("    src     : %s\n", r->src);
+        LOG_INFO("    dst     : %s\n", r->dst);
+        LOG_INFO("    plugin  : %s\n", r->plugin);
+        LOG_INFO("    handler : %s\n", r->handler);
     }
 
-    printf("\n=============================================\n\n");
+    LOG_INFO("\n=============================================\n\n");
 }

@@ -40,6 +40,16 @@
             }
         },
         {
+            "name": "HOST_IPC",
+            "type": "ipc",
+            "use_frame":false,
+            "ipc":{
+                "path":"/tmp/test.sock"
+            }
+
+
+        },
+        {
             "name": "NET0",
             "type": "tcp_server",
             "use_frame":false,
@@ -65,27 +75,15 @@
     "routes": [
         {
             "src": "UART1",
-            "dst": "USB_CDC",
+            "dst": "HOST_IPC",
             "plugin": "filter",
             "handler": "filter.uart_to_usb"
         },
         {
-            "src": "USB_CDC",
+            "src": "HOST_IPC",
             "dst": "UART1",
             "plugin": "filter",
             "handler": "filter.usb_to_uart"
-        },
-        {
-            "src": "NET0",
-            "dst": "UART1",
-            "plugin": "codec",
-            "handler": "codec.decode"
-        },
-        {
-            "src": "UART1",
-            "dst": "NET0",
-            "plugin": "codec",
-            "handler": "codec.encode"
         }
     ]
 }

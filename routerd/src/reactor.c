@@ -37,10 +37,6 @@ void reactor_init(void)
         LOG_WARN("[reactor] epoll_create failed\n");
         return;
     }
-
-    // for (int i = 0; i < MAX_REACT_FDS; i++){
-    //     reactor_fds[i]=-1;
-    // }
     LOG_INFO("[reactor] init ok\n");
 }
 
@@ -177,9 +173,9 @@ void* reactor_thread(void* arg)
                 }
 
                 LOG_INFO("[reactor] new client connected from %s:%d, fd=%d\n",
-                       inet_ntoa(client_addr.sin_addr),
-                       ntohs(client_addr.sin_port),
-                       client_fd);
+                 inet_ntoa(client_addr.sin_addr),
+                 ntohs(client_addr.sin_port),
+                 client_fd);
 
                 // 建立新的 port_def_t 结构体用于 client_fd
                 port_def_t* client_port = calloc(1, sizeof(port_def_t));
@@ -192,51 +188,75 @@ void* reactor_thread(void* arg)
                 continue;  // 不要再往下执行 read()
             }
 
+            if (port->base.type == PORT_IPC_SERVER) {
+
+                int client_fd = accept(fd, NULL, NULL);
+                if (client_fd < 0) {
+                    perror("[reactor] ipc accept");
+                    continue;
+                }
+
+                port_def_t* client = calloc(1, sizeof(port_def_t));
+
+                // 继承 server 的逻辑名字（一般是 "HOST"）
+                strcpy(client->base.name, port->base.name);
+
+                client->base.fd   = client_fd;
+                client->base.type = PORT_IPC_CLIENT;   // ✅ 正确
+                reactor_add_port(client);
+                LOG_INFO("[ipc] new %s client fd=%d\n",
+                client->base.name, client_fd);
+                continue;   // 不再往下 read()
+                }
+
             // ============================================
             // ② 普通客户端或设备端口：读取数据
             // ============================================
-            uint8_t buf[1024];
-            int len = read(fd, buf, sizeof(buf));
+                uint8_t buf[1024];
+                int len = read(fd, buf, sizeof(buf));
+                if(len>0){
+                    buf[len]='\0';
+                }
 
-            if (len <= 0) {
+                if (len <= 0) {
                 // 客户端断开连接
-                LOG_INFO("[reactor] fd=%d closed\n", fd);
-                epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
-                close(fd);
-                continue;
-            }
+                    LOG_INFO("[reactor] fd=%d closed\n", fd);
+                    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    continue;
+                }
 
-            LOG_INFO("[reactor] recv from %s fd=%d len=%d\n",
+                LOG_INFO("[reactor] recv from %s fd=%d len=%d\n",
                    port->base.name, fd, len);
-            LOG_INFO("[reactor] data: %.*s\n", len, buf);
+                LOG_INFO("[reactor] data: %d ,%s\n", len, buf);
 
             // === 路由转发逻辑 ===
-            route_def_t* routes[16];
-            LOG_INFO("port name=%s\n",port->base.name);
-            int rn = config_find_routes_by_src(port->base.name, routes, 16);
-            LOG_INFO("find routes counte=%d\n",rn);
-            for (int j = 0; j < rn; j++) {
-                route_def_t* r = routes[j];
-                plugin_handler_t handler = plugin_get_handler(r->handler);
-                int data_len = len;
-                if (handler)
-                    data_len = handler(buf, len);
+                route_def_t* routes[16];
+                LOG_INFO("port name=%s\n",port->base.name);
+                int rn = config_find_routes_by_src(port->base.name, routes, 16);
+                LOG_INFO("find routes counte=%d\n",rn);
+                for (int j = 0; j < rn; j++) {
+                    route_def_t* r = routes[j];
+                    plugin_handler_t handler = plugin_get_handler(r->handler);
+                    int data_len = len;
+                    if (handler)
+                        data_len = handler(buf, len);
 
-                event_msg_t msg;
+                    event_msg_t msg;
 
                 //r->dst type
 
 
-                memcpy(msg.dst, r->dst, sizeof(msg.dst));
-                msg.len = data_len;
-                memcpy(msg.data, buf, data_len);
-                queue_push(&msg);
+                    memcpy(msg.dst, r->dst, sizeof(msg.dst));
+                    msg.len = data_len;
+                    memcpy(msg.data, buf, data_len);
+                    queue_push(&msg);
 
-                LOG_INFO("Route: %s -> %s, push message to queue\n", r->src, r->dst);
+                    LOG_INFO("Route: %s -> %s, push message to queue\n", r->src, r->dst);
+                }
             }
         }
     }
-}
 
 
 

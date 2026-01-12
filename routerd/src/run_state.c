@@ -23,6 +23,8 @@ void run_state_init(void)
     printf("[run_state] signal handlers installed\n");
 }
 
+
+// daemono
 // 外部主动停止（用于内部控制，如IPC退出命令）
 void run_state_stop(void)
 {

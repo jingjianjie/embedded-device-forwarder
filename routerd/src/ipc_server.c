@@ -37,7 +37,7 @@ int ipc_server_init(const char* sockpath)
 
     listen(fd, 5);
 
-    g_ipc_fd = fd;r
+    g_ipc_fd = fd;
     return fd;
 }
 
@@ -82,7 +82,7 @@ void* ipc_thread(void* arg){
         if (client_fd < 0) {
             // sleep(10);
             // perror("accept");
-            usleep(50*1000);
+            usleep(500*1000);
             continue;
         }
 

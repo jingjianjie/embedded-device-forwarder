@@ -27,10 +27,6 @@ config_t g_config;
     } while (0)
 
 
-
-
-
-
 // ============ 工具函数 ============
 static void clear_config()
 {
@@ -162,6 +158,12 @@ static void parse_ports(cJSON* arr)
 
             GET_STR(u, "path", p->cfg.usb.path);
         }
+        else if(strcmp(type_str,"ipc")==0){
+            p->base.type=PORT_IPC_SERVER;
+            cJSON* u=cJSON_GetObjectItem(item,"ipc");
+            GET_STR(u, "path", p->cfg.ipc.path);
+        }
+
         else {
             LOG_INFO("[config] ERROR: unknown port type: %s\n", type_str);
         }
@@ -466,6 +468,10 @@ void config_print()
             case PORT_USB:
                 LOG_INFO("usb\n");
                 LOG_INFO("      path      : %s\n", p->cfg.usb.path);
+                break;
+            case PORT_IPC_SERVER:
+                LOG_INFO("ipc\n");
+                LOG_INFO("      path      : %s\n", p->cfg.ipc.path);
                 break;
 
             default:

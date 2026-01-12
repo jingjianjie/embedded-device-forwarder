@@ -13,7 +13,9 @@ typedef enum {
     PORT_TCP_SERVER,
     PORT_TCP_CLIENT,
     PORT_UDP,
-    PORT_USB
+    PORT_USB,
+    PORT_IPC_SERVER,
+    PORT_IPC_CLIENT,
 } port_type_t;
 
 typedef enum {
@@ -64,6 +66,11 @@ typedef struct {
     char path[128];
 } port_usb_conf_t;
 
+typedef struct{
+    char path[128];
+}port_ipc_conf_t;
+
+
 typedef struct {
     port_base_t base;
 
@@ -73,6 +80,7 @@ typedef struct {
         port_tcp_client_conf_t tcp_client;
         port_udp_conf_t        udp;
         port_usb_conf_t        usb;
+        port_ipc_conf_t        ipc;
     } cfg;
 
 } port_def_t;

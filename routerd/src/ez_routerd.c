@@ -11,6 +11,7 @@
 #include "log.h"
 #include "run_state.h"
 
+
 void* dispatcher_thread(void* arg)
 {
     event_msg_t msg;
@@ -19,6 +20,7 @@ void* dispatcher_thread(void* arg)
         router_core_handle(&msg);
     }
 }
+
 
 int main(int argc,char* argv[])
 {

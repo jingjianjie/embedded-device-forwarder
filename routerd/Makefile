@@ -29,6 +29,10 @@ SRCS = src/ez_routerd.c \
 SRCS+=3rdparty/cjson/cJSON.c
 CFLAGS+=-I3rdparty/cjson
 
+
+# GDB debug 
+DEBUG_CFLAGS= -g -DDEBUG
+
 # 默认规则
 all: $(OUT_DIR) $(TARGET)
 
@@ -42,6 +46,16 @@ $(TARGET): $(SRCS)
 	@echo ""
 	@echo "Build success!"
 	@echo "Executable output → $(TARGET)"
+	@echo ""
+
+
+# 调试目标
+debug: $(OUT_DIR) $(SRCS)
+	$(CC) $(CFLAGS) $(DEBUG_CFLAGS) -o $(TARGET) $(SRCS)
+	@echo ""
+	@echo "Debug build success!"
+	@echo "Executable output → $(TARGET)"
+	@echo "Start GDB with: gdb $(TARGET)"
 	@echo ""
 
 # 清理

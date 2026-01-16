@@ -361,7 +361,7 @@ case PORT_TCP_CLIENT:{
     status=write(fd, data, len);
     break;
 }
-case PORT_TCP_CLIENT:{
+case PORT_IPC_CLIENT:{
     status=write(fd,data,len);
     break;
 }
@@ -370,7 +370,7 @@ case PORT_TCP_SERVER:{
     status=len;
     break;
 }
-case PORT_TCP_CLIENT:{
+case PORT_IPC_SERVER:{
     status=write(fd,data,len);
 }
 

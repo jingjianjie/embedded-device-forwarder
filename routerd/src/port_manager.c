@@ -127,6 +127,7 @@ static int port_open_tcp_server(port_def_t* p)
     if(listen(fd, p->cfg.tcp_server.backlog)<0){
         perror("[Tcp server] listen");
         close(fd);
+        return -1;
     }
     LOG_INFO("listen %s \n",p->cfg.tcp_server);
     return fd;
@@ -253,6 +254,7 @@ int port_open_single(port_def_t* p)
             break;
         case PORT_IPC_SERVER:
             fd=port_open_ipc_server(p);
+            break;
         default:
             LOG_INFO("[port] unknown type %d\n", p->base.type);
             return -1;

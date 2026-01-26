@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -213,7 +214,7 @@ void* reactor_thread(void* arg)
             // ② 普通客户端或设备端口：读取数据
             // ============================================
                 uint8_t buf[1024];
-                int len = read(fd, buf, sizeof(buf));
+                int len = read(fd, buf, sizeof(buf) - 1);  // 留一个位置给 '\0'
                 if(len>0){
                     buf[len]='\0';
                 }
@@ -223,6 +224,21 @@ void* reactor_thread(void* arg)
                     LOG_INFO("[reactor] fd=%d closed\n", fd);
                     epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
                     close(fd);
+                    
+                    // 从 g_port_table 中移除并释放动态分配的客户端
+                    for (int k = 0; k < MAX_PORTS; k++) {
+                        if (g_port_table[k].used && g_port_table[k].fd == fd) {
+                            g_port_table[k].used = 0;
+                            g_port_table[k].fd = -1;
+                            // 只有动态分配的客户端需要 free
+                            if (port->base.type == PORT_TCP_CLIENT || 
+                                port->base.type == PORT_IPC_CLIENT) {
+                                free(g_port_table[k].port);
+                            }
+                            g_port_table[k].port = NULL;
+                            break;
+                        }
+                    }
                     continue;
                 }
 
@@ -254,13 +270,10 @@ void* reactor_thread(void* arg)
 
                     LOG_INFO("Route: %s -> %s, push message to queue\n", r->src, r->dst);
                 }
-            }
         }
     }
-
-
-
-
+    return NULL;
+}
 
 static pthread_mutex_t reactor_mutex=PTHREAD_MUTEX_INITIALIZER;
 void reactor_lock(){

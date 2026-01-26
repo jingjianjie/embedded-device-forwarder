@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <pthread.h>
 #include "reactor.h"
 #include "ipc_server.h"
@@ -19,6 +20,7 @@ void* dispatcher_thread(void* arg)
         queue_pop(&msg);
         router_core_handle(&msg);
     }
+    return NULL;
 }
 
 

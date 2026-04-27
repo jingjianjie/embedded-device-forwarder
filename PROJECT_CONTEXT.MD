@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v5`
+> **版本**: `v6`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -69,4 +69,12 @@
 
 **18.[LM_5]** **删代码前必 `grep` 全仓**(`CLAUDE.md` §10 / §6.4 落实案例)。2026-04-28 阶段 0.5 收尾发现 `routerd/src/net_handler.c` + `routerd/include/net_handler.h` 是死代码:文件头自引用 + Makefile 未列入 SRCS + 无任何 `.c` 调用其符号 + 引用了已删除类型(`event_msg_t.type` / `EVT_NET_IN`)→ 导致单独编译会失败。已删除。**Why**: 文件名暗示"网络处理",但实际职责为零,新人会被误导。删除时必须满足三条:(a) 全仓 `grep` 仅自引用;(b) 任何 Makefile / build script 不列入;(c) 引用了已不存在的符号(强证据)。**How to apply**: 看到可疑死代码,先 grep 三遍再删 — 不要单凭 "Makefile 没列" 就删,可能是被预备的扩展点。
 
-**19.[LM_5]** **paramiko 4.0 的 `sftp.put()` 在 Windows + Armbian 组合下偶发 ENOENT**。`scripts/deploy_target.py` 已用流式写绕开:`with open(local,"rb") as src, sftp.open(remote,"wb") as dst: dst.write(src.read())`。**Why**: 协议握手 / 路径规范化的版本兼容问题,paramiko 4.0 改了 SFTP 实现。**How to apply**: 任何 dev → target 文件传输都走 `scripts/deploy_target.py` 的 `put` / `put_dir`,不要用 `sftp.put()`。
+**19.[LM_5]** **paramiko 4.0 的 `sftp.put()` 在 Windows + Armbian 组合下偶发 ENOENT**。`scripts/deploy_target.py` 已用流式写绕开:`with open(local,"rb") as src, sftp.open(remote,"wb") as dst: dst.write(src.read())`。**Why**: 协议握手 / 路径规范化的版本兼容问题,paramiko 4.0 改了 SFTP 实现。**How to apply**: 任何 dev → target 文件传输都走 `scripts/deploy_target.py` 的 `put` / `put_dir`,不要用 `sftp.put()`。**v6 补丁**: 流式 sftp.open 在某些路径仍偶发 ENOENT,有效 fallback 是 `ssh exec "base64 -d > /path"` + 客户端 base64 编码。等真的频繁触发时再内化进 `deploy_target.py`,目前手工 inline 已够用。
+
+---
+
+## 协议层契约(v6 新增,阶段 1 C-1 落地)
+
+**20.[LM_6]** **packed wire-format struct 必须用 `memcpy` 整头拷贝**,不通过结构指针按字段访问。**Why**: ARM (RK3588 / 嵌入式 ARM 普遍)对 packed struct 字段的 misaligned 访问可能触发 UB 或性能塌方;memcpy 是显式声明字节流意图的安全方式。**How to apply**: `proto_codec.c` 已示范(`memcpy(buf, hdr, PROTO_HDR_SIZE)`);后续 `proto_dispatcher.c` / SDK / `registry.c` 中**任何**接触 `proto_frame_hdr_t` 二进制流的地方,都按这套规则。**禁止**: `frame_ptr->cmd` 这类直接 cast + 解引用 buffer。
+
+**21.[LM_6]** **`PROTO_ERR_INCOMPLETE` 不是真错误**,是流式协议的正常状态(继续 `read()` 凑够帧)。区别于 `BAD_MAGIC` / `BAD_VERSION` / `PAYLOAD_TOO_LARGE` 这些**致命**错误(应断连或丢弃整个连接的缓冲区)。**Why**: 阶段 1 C-2 起的 dispatcher 在调用 `proto_decode()` 时如果把所有负值统一处理(比如都断连),会在正常的"读了一半"场景下错误断连,造成假性故障。**How to apply**: dispatcher / SDK 必须对 `INCOMPLETE` 与其他错误码分别处理。`doc/router_protocol.md` 错误码表已显式标注。

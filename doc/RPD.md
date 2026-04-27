@@ -129,6 +129,10 @@ ez_router 把其余全部包了。
 
 ### 阶段 1 — 协议层(地基)
 
+**进度状态(v2 后追加,随阶段推进)**:
+- **C-1**(帧定义 + codec + 规约文档): ✅ HEAD,详见 `routerd/include/protocol.h`、`routerd/src/proto_codec.c`、`doc/router_protocol.md`、`tests/unit/test_proto_codec.c`(dev + target 双端 27/27 PASS)
+- **C-2**(`registry.h/c` + `proto_dispatcher.c` + 切换 `ipc_server.c` 用新 codec): open
+
 #### 1.1 帧格式
 
 ```c

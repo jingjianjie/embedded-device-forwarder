@@ -79,8 +79,12 @@ ez_router 把其余全部包了。
 | 配置语言 | 沿用 cJSON(已在用) | 体量小,无引入新依赖必要 |
 | 单测框架(C) | **Unity (ThrowTheSwitch)** | 单文件、零依赖、嵌入式标准 |
 | 集成测试编排 | **pytest + paramiko**(在 dev 机跑,远程驱动 OrangePi) | 表达力强、好做 fixture/teardown |
-| 硬件 watchdog | `/dev/watchdog`,不可用时降级软 watchdog | 板子未必都开 |
+| 硬件 watchdog | **`/dev/watchdog0` + ioctl,RK3588 自带**(已实测可用) | 测试机为 OP5+,Synopsys DesignWare WDT,默认 44s |
+| 插件崩溃策略 | **不隔离**,plugin segfault 直接拖垮 ez_router | 由 hw watchdog 在超时后整板复位重启,简化设计 |
 | 日志落盘 | 内存 ring + 时间(30s)/大小(1MB)双触发 + 信号强刷 | 平衡 SD 卡寿命和数据完整性 |
+| 日志后端 | **只用自管 log_sink,不双写 journald** | 减少复杂度;journald 自动从 systemd unit 收 stderr 已足够诊断崩溃 |
+| C# SDK 目标框架 | **`net8.0` only**(无 netstandard 兼容层) | 上位机统一 .NET 8 |
+| 协议演进 | **第一版激进设计,不预留兼容字段** | 现有代码量小,直接重构;后续靠 `version` 字段 bump |
 | 升级载荷 | 走协议帧分片 + SHA-256 + 自动回滚 | 不引入额外通道 |
 
 ---
@@ -236,7 +240,7 @@ ezr_log(h, EZR_LOG_INFO, "tag", "...");
 
 #### 4.2 C# SDK(全新)
 
-- TFM: `netstandard2.0`(兼容老 PC) + `net8.0`(主用)
+- TFM: **`net8.0` only**(上位机统一 .NET 8,无需兼容老框架)
 - `Task<int> SendAsync(string port, ReadOnlyMemory<byte> data, CancellationToken ct)`
 - 大数据零拷贝路径: `ArrayPool<byte>.Shared` + `PipeReader/Writer`
 - NuGet 包名: `EmbeddedDeviceRouter.Sdk`
@@ -274,12 +278,14 @@ ezr_log(h, EZR_LOG_INFO, "tag", "...");
 
 | 项 | 值 |
 |---|---|
-| 主机 | OrangePi(型号待确认,推测 Zero3 / Zero2W) |
+| 主机 | **Orange Pi 5 Plus**(RK3588,aarch64) |
 | IP | `192.168.31.6` |
 | 账号 | `root` / `orangepi` |
-| OS | Debian/Armbian(待确认) |
+| OS | **Armbian**,内核 `6.1.115-vendor-rk35xx` |
 | 安全等级 | **无要求**,可随意 ssh、随意写文件、随意重启 |
 | 部署路径 | `/opt/ez_router/`(代码 + 配置 + 日志) |
+| 硬件 watchdog | **`/dev/watchdog0` 可用**,Synopsys DesignWare,默认 timeout 44s。`MAGICCLOSE=0`(不支持 'V' 字符优雅停),具体 close 行为由内核 `nowayout` 决定,阶段 2 实测 |
+| 工具链 | `wdctl`(util-linux)已装,`gcc`/`make`/`systemd` 齐全 |
 
 ### 6.2 测试金字塔
 
@@ -411,15 +417,23 @@ echo "deployed."
 
 ---
 
-## 9. 风险与未决问题
+## 9. 已决议事项
+
+R1-R5 在 v1 草案评审时已敲定,记录于此供回溯。新的未决问题请在下方追加。
+
+| # | 问题 | 决议 |
+|---|---|---|
+| R1 | 测试机型号、`/dev/watchdog` 是否可用? | **OP5+ / RK3588 / Armbian 6.1.115**,`/dev/watchdog0` Synopsys DesignWare 实测可用,默认 timeout 44s。`MAGICCLOSE=0`,具体 close 行为待阶段 2 跑实测确定(`nowayout` 内核选项)。详见 §6.1。 |
+| R2 | C# SDK 最低 .NET 版本? | **`net8.0` only**。 |
+| R3 | 插件 segfault 是否必须不连累 router? | **接受连累**。由 hw watchdog 整板复位重启,简化设计。 |
+| R4 | 是否双写 journald? | **不双写**,只用自管 log_sink。systemd unit 的 stderr 仍会被 journald 收(自动),无需主动配置。 |
+| R5 | 协议演进策略? | **第一版激进设计,不预留兼容字段**;后续靠帧头 `version` bump。现有代码量小直接重构。 |
+
+### 待解决
 
 | # | 问题 | 决策点 |
 |---|---|---|
-| R1 | OrangePi 具体型号? `/dev/watchdog` 是否可用? | 阶段 2 开始前要在测试机上 `cat /sys/class/watchdog/*/identity` 确认 |
-| R2 | C# SDK 上位机最低 .NET 版本? | 影响 TFM 选择,需要业务方给 |
-| R3 | 子程序在进程内(插件)形态时,segfault 必然连累 ez_router,是否接受? | 推荐**进程外为默认**,插件仅用于不需要隔离的轻量 hook |
-| R4 | 日志是否同时走 systemd-journald? | 推荐双写:严重日志 → stderr 让 journald 收,完整日志 → 自管文件 |
-| R5 | 协议演进策略(虽然现在不要兼容)? | 帧头有 `version` 字段,后面 bump 即可;**第一版可以激进设计** |
+| O1 | watchdog 在 daemon 退出时是否需要"停"? | 阶段 2 跑 `cat /sys/module/dw_wdt/parameters/nowayout`(若有)及 close-fd 实测;若 nowayout=Y,只能接受"daemon 一旦退出板子在 44s 内重启",作为运维约束写入 build_guide |
 
 ---
 

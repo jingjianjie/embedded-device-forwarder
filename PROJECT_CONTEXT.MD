@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v1`
+> **版本**: `v2`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -42,3 +42,11 @@
 **10.[LM_1]** **删代码前先 grep**。删除任何看似无用的代码 / 文件 / 配置前,先扫 xref / Makefile 引用 / `config.json` 引用。看似多余的代码先假设它在避坑(Chesterton's Fence,`CLAUDE.md` §6.4)。**Why**: 项目早期残留较多,曾删除过被 Makefile 隐式引用但 IDE 看不出的文件。
 
 **11.[LM_1]** **日志只走自管 `log_sink`,不双写 journald**。systemd unit 的 stderr 自动被 journald 收已足够诊断崩溃,无需主动配置。**Why**: 决议 R4。双写增加复杂度无收益。
+
+---
+
+## 协作约束(v2 新增)
+
+**12.[LM_2]** **存在并行开发者**。2026-04-27 我们做仓库清理 + RPD + agent 基建期间,远端被推入 commit `5246de2`(Author: `Developer <developer@example.com>`),修了 RPD 阶段 0 中 0.4 + 顺手解决了 0.6 队列溢出 + 自带 4 项我们没列入的 bug 修复(NULL 解引用顺序、PORT_IPC_SERVER fallthrough、TCP listen 错误路径、read off-by-one)。**Why**: 项目原本被认为"没人懂",但实际上有人在并行修 bug。**How to apply**: (a) 工作开始前必 `git fetch` 并查 origin/main 是否有新 commit;(b) 委派 agent 任务前**先核对 RPD 阶段表的状态列**,不要重复劳动;(c) 长会话中也建议中途 fetch 一次,降低撞车概率;(d) 重要重构(如 rename / 大移动)开工前在 issue / chat 知会团队。
+
+**13.[LM_2]** **rename + 远端并行修改的合并方式 = `git rebase origin/main`**。Git 的 rename 检测会自动把对方对旧文件名的修改 forward 到新文件,前提是行级别不重叠。本次 `ez_routerd.c → ez_router.c` 的 rename 与 Developer 对 `ez_routerd.c` 的 `unistd.h` / `return NULL` 改动通过 rebase 干净合并(commit `9b072ba` 之前)。**Why**: 决策时间 2026-04-27,作为后续遇到类似撞车的标准动作。**How to apply**: 不要 force push、不要 `--allow-unrelated-histories`,先 rebase,冲突时停下来手工解。

@@ -93,14 +93,19 @@ ez_router 把其余全部包了。
 
 ### 阶段 0 — 现状加固
 
-| # | 任务 | 文件 |
-|---|---|---|
-| 0.1 | 修 plugin 返回值越界(可能栈溢出) | `routerd/src/reactor.c:241-252` |
-| 0.2 | `strcpy(addr.sun_path,...)` → `strncpy` | `ipc_server.c:33`、`reactor.c:182,202` |
-| 0.3 | 实现 TCP_SERVER 的 `port_send` | `port_manager.c:369-371` |
-| 0.4 | TCP/IPC client 断开时释放 `calloc` 的 `port_def_t` | `reactor.c:181,199,223-226` |
-| 0.5 | 删大段被注释的死代码 | `reactor.c:94-148` |
-| 0.6 | 端到端 loopback 集成测试(TCP↔TCP、UART↔UART) | `tests/integration/test_loopback.py` |
+| # | 任务 | 文件 | 状态 |
+|---|---|---|---|
+| 0.1 | 修 plugin 返回值越界(可能栈溢出) | `routerd/src/reactor.c:241-252` | open |
+| 0.2 | `strcpy(addr.sun_path,...)` → `strncpy` | `ipc_server.c:33`、`reactor.c:182,202` | open |
+| 0.3 | 实现 TCP_SERVER 的 `port_send` | `port_manager.c:369-371` | open |
+| 0.4 | TCP/IPC client 断开时释放 `calloc` 的 `port_def_t` | `reactor.c:181,199,223-226` | ✅ **commit `5246de2`(Developer)** |
+| 0.5 | 删大段被注释的死代码 | `reactor.c` | open |
+| 0.6 | 端到端 loopback 集成测试(TCP↔TCP、UART↔UART) | `tests/integration/test_loopback.py` | open(队列满覆盖问题已被 `5246de2` 顺手解决) |
+| 0.7 | router_core.c NULL 解引用顺序 | `router_core.c:13-19` | ✅ **commit `5246de2`(Developer)** |
+| 0.8 | port_manager.c PORT_IPC_SERVER case 缺 break(fallthrough) | `port_manager.c:254` | ✅ **commit `5246de2`(Developer)** |
+| 0.9 | port_manager.c TCP listen 失败缺 return | `port_manager.c:127` | ✅ **commit `5246de2`(Developer)** |
+| 0.10 | reactor.c read 缓冲区 off-by-one | `reactor.c:215` | ✅ **commit `5246de2`(Developer)** |
+| 0.11 | event_queue.c 队列满覆盖(双 cond 阻塞 push) | `event_queue.c` | ✅ **commit `5246de2`(Developer)** |
 
 **交付**: 一个稳定的"基本透明转发器"(对应原目标 3)。
 **验收**: 单测 100% 通过 + 集成 loopback 跑 1 小时无泄漏(valgrind on target)。

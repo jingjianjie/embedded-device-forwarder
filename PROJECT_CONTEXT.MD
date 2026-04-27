@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v4`
+> **版本**: `v5`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -55,10 +55,18 @@
 
 ## 运行时不变量(v4 新增)
 
-**14.[LM_4]** **reactor 线程不可被任何 send 路径阻塞**。reactor 是 epoll 单线程消费,如果 `port_send` / `queue_push` 阻塞它,整个 epoll 循环卡死,所有端口卡死。**Why**: 决议 R3 的兜底前提是"reactor 卡死后被 hw watchdog 复位",但 reactor 还在跑就还在喂狗 → watchdog 永不超时 → 整板假死。**How to apply**: (a) `queue_push` 必须 timeout drop+WARN(RPD 阶段 0.12 / R-1);(b) `port_send` 写慢 TCP 客户端时,要么走 EAGAIN 非阻塞 + 上层重试,要么直接丢包;(c) 任何新引入的"等待"操作都要在 reactor 线程外做。**Source**: `doc/reviews/rpd-v1-2026-04-27.md` C-A,commit `5246de2` 把"队列覆盖"切面转移到了"reactor 阻塞"切面。
+**14.[LM_5]** **reactor 线程不可被任何 send 路径阻塞**。reactor 是 epoll 单线程消费,如果 `port_send` / `queue_push` 阻塞它,整个 epoll 循环卡死,所有端口卡死。**Why**: 决议 R3 的兜底前提是"reactor 卡死后被 hw watchdog 复位",但 reactor 还在跑就还在喂狗 → watchdog 永不超时 → 整板假死。**How to apply**: (a) `queue_push` 已 timeout drop+WARN(阶段 0.12 闭合,timeout=100ms,见 `event_queue.h`);(b) **`port_send` 对 `PORT_TCP_SERVER` 当前是阻塞 socket 的 broadcast(阶段 0.3),仍违反本契约 — 阶段 1 传输层重写时改非阻塞 socket + EAGAIN 处理**;(c) 任何新引入的"等待"操作都要在 reactor 线程外做。**Source**: `doc/reviews/rpd-v1-2026-04-27.md` C-A。
 
 **15.[LM_4]** **`/var/log` 在 target 上是 zram volatile**(armbian-ramlog 默认 50 MB,断电丢失)。**Why**: Armbian 默认配置,目的是减少 SD 卡写入。**How to apply**: ez_router 持久化日志写 **`/var/lib/ez_router/log/`**(SD 卡,但 mmcblk1 baseline 6w 上电只写 4.4 GB,寿命压力可接受);诊断日志走 stderr 让 systemd journald 自动收(也走 zram,断电丢失但运行时可读);**不要**把 `/var/log/ez_router.log` 当持久存储。
 
 **16.[LM_4]** **协议帧 `seq` 字段是发送方递增计数**。接收方仅用于 ACK/响应帧关联(REGISTER ↔ REGISTER_ACK),**不**做查重 / 幂等 / 排序保证。发送方重启后从 0 复位。**Why**: R-3 决议(`doc/RPD.md` §9 / `doc/reviews/rpd-v1-2026-04-27.md` C-C)。R5 激进无兼容字段原则下,后期改 seq 语义比加字段还贵,所以现在就钉死。**How to apply**: 实现 `proto_codec.c` 时按本契约;业务层若需要幂等,自加幂等键到 payload。
 
 **17.[LM_4]** **运行时热加载是 non-goal**。改 `config.json` / 路由表 / 端口配置 = 重启 daemon。**Why**: R-8 决议(RPD §2 第 6 条)。SDK 的 IPC 接口仅用于上位机控制平面(下发命令、查询状态),**不接受路由结构变更请求**。**How to apply**: 不要把 `ezr_set_routes` 之类的 API 重新引入;`config_store.c` 的解析路径不需要并发安全(只在启动时走一次)。
+
+---
+
+## 工程实践案例(v5 新增)
+
+**18.[LM_5]** **删代码前必 `grep` 全仓**(`CLAUDE.md` §10 / §6.4 落实案例)。2026-04-28 阶段 0.5 收尾发现 `routerd/src/net_handler.c` + `routerd/include/net_handler.h` 是死代码:文件头自引用 + Makefile 未列入 SRCS + 无任何 `.c` 调用其符号 + 引用了已删除类型(`event_msg_t.type` / `EVT_NET_IN`)→ 导致单独编译会失败。已删除。**Why**: 文件名暗示"网络处理",但实际职责为零,新人会被误导。删除时必须满足三条:(a) 全仓 `grep` 仅自引用;(b) 任何 Makefile / build script 不列入;(c) 引用了已不存在的符号(强证据)。**How to apply**: 看到可疑死代码,先 grep 三遍再删 — 不要单凭 "Makefile 没列" 就删,可能是被预备的扩展点。
+
+**19.[LM_5]** **paramiko 4.0 的 `sftp.put()` 在 Windows + Armbian 组合下偶发 ENOENT**。`scripts/deploy_target.py` 已用流式写绕开:`with open(local,"rb") as src, sftp.open(remote,"wb") as dst: dst.write(src.read())`。**Why**: 协议握手 / 路径规范化的版本兼容问题,paramiko 4.0 改了 SFTP 实现。**How to apply**: 任何 dev → target 文件传输都走 `scripts/deploy_target.py` 的 `put` / `put_dir`,不要用 `sftp.put()`。

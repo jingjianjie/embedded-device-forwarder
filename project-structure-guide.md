@@ -75,15 +75,29 @@
 
 **涉及文件**:
 - `scripts/manage_ez_router.sh` — systemd 服务管理脚本(在 target 上跑)
-- `scripts/deploy_target.sh` — RPD §6.5 计划新增,dev → target 部署
+- `scripts/deploy_target.py` — Python 部署 helper(已落地,RPD §6.5 兑现)。**注**: 用流式 SFTP 绕开 paramiko 4.0 sftp.put bug,见 `PROJECT_CONTEXT.MD` 条目 19
 - `tests/integration/conftest.py` — RPD §6.5 计划新增,pytest fixture
 - 全局 memory:`C:\Users\win\.claude\projects\F--013-device-forwarder-embedded-device-forwarder\` 是会话存储位置(对应 ez-router-engineer 的 inbox/jsonl 索引来源)
 
 **隐式依赖**:
 - 测试机 ssh 凭据是 `root/orangepi`(在 `doc/RPD.md` §6.1 与 `PROJECT_CONTEXT.MD` 都记录,**不要**在代码里硬编码)
-- target 部署路径约定 `/opt/ez_router/`,改这个会破坏 systemd unit
-- 硬件 watchdog 隐性约束:`MAGICCLOSE=0`,daemon 退出可能整板重启(O1 待实测)
+- target 部署路径约定 `/opt/ez_router_test/`(测试用)和 `/opt/ez_router/`(生产),改这个会破坏 systemd unit
+- 硬件 watchdog 隐性约束:`/dev/watchdog0` 可用,`CONFIG_WATCHDOG_NOWAYOUT not set`,daemon close 安全(R6 闭合)
+- target 代理: `http_proxy=http://192.168.31.75:7890`(`/etc/environment`),`git pull` 走代理 OK
 
 **推荐导航**:
-1. SSH 探查命令模板见 `change-log.md` 2026-04-27 RPD R1 验证那一段
-2. 部署脚本草案见 `doc/RPD.md` §6.5
+1. SSH 探查命令模板见 `memory/change-log.md` 2026-04-27 RPD R1 验证那一段
+2. 部署脚本: `scripts/deploy_target.py` exec/put/put_dir,已含 paramiko 4.0 bug workaround
+
+---
+
+## E5. `routerd/src/net_handler.c` 已删除(原死代码导航陷阱)
+
+**核心发现**: 截至 commit `3a08516`,`net_handler.c` + `net_handler.h` 存在但**完全无效**:
+- 文件名暗示"网络处理",但实际无任何调用方
+- Makefile `SRCS` 未列入(隐式排除),所以全 build 干净
+- 引用了已删除的类型(`event_msg_t.type` / `EVT_NET_IN`)— 单独编译会失败
+
+**已在阶段 0.5 删除**(commit 待定)。
+
+**导航教训**: 看到 `net_handler.c` / `uart_handler.c` / `forward.c` 这种以"职责名"命名的文件**先看 Makefile 是否引用**。Makefile lines 24-25 仍有 `# src/uart_handler.c` `# src/forward.c` 注释占位 — 它们也是死代码(同期废弃),保留行号是早期作者的"未来扩展点占位",但 grep 全仓发现都已无引用。如新人接手对这些感到疑惑,**先 grep 全仓再删,而不是先看名字**(`PROJECT_CONTEXT.MD` 条目 18)。

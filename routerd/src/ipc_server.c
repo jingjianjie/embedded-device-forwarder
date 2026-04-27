@@ -30,7 +30,9 @@ int ipc_server_init(const char* sockpath)
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strcpy(addr.sun_path, sockpath);
+    // sun_path 仅 108 字节(linux),不够长直接截断比 stack smash 安全
+    strncpy(addr.sun_path, sockpath, sizeof(addr.sun_path) - 1);
+    addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
 
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0)
         return -1;

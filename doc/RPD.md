@@ -106,17 +106,17 @@ ez_router 把其余全部包了。
 | # | 任务 | 文件 | 状态 |
 |---|---|---|---|
 | 0.1 | 修 plugin 返回值越界(可能栈溢出) | `routerd/src/reactor.c:258-272` | ✅ **HEAD**(ez-router-engineer + test-as-doc `tests/unit/test_plugin_clamp.c`) |
-| 0.2 | `strcpy(addr.sun_path,...)` → `strncpy` | `ipc_server.c:33`、`reactor.c:182,202` | open |
-| 0.3 | 实现 TCP_SERVER 的 `port_send` | `port_manager.c:369-371` | open |
+| 0.2 | `strcpy(addr.sun_path,...)` → `strncpy` | `ipc_server.c:30-35`、`reactor.c:88-94,109-114` | ✅ **HEAD**(ez-router-engineer) |
+| 0.3 | 实现 TCP_SERVER 的 `port_send`(broadcast 给所有 accept 出来的 client) | `port_manager.c:71-99,411-414` | ✅ **HEAD**(ez-router-engineer)。注:阻塞 socket 仍违反 §14,阶段 1 改非阻塞 |
 | 0.4 | TCP/IPC client 断开时释放 `calloc` 的 `port_def_t` | `reactor.c:181,199,223-226` | ✅ **commit `5246de2`(Developer)** |
-| 0.5 | 删大段被注释的死代码 | `reactor.c` | open |
+| 0.5 | 删大段被注释的死代码 | `reactor.c` (372→269 行) + 删 `net_handler.c/h`(死代码,Makefile 未引用) | ✅ **HEAD**(ez-router-engineer) |
 | 0.6 | 端到端 loopback 集成测试(TCP↔TCP、UART↔UART) | `tests/integration/test_loopback.py` | open(队列满覆盖问题已被 `5246de2` 顺手解决) |
 | 0.7 | router_core.c NULL 解引用顺序 | `router_core.c:13-19` | ✅ **commit `5246de2`(Developer)** |
 | 0.8 | port_manager.c PORT_IPC_SERVER case 缺 break(fallthrough) | `port_manager.c:254` | ✅ **commit `5246de2`(Developer)** |
 | 0.9 | port_manager.c TCP listen 失败缺 return | `port_manager.c:127` | ✅ **commit `5246de2`(Developer)** |
 | 0.10 | reactor.c read 缓冲区 off-by-one | `reactor.c:215` | ✅ **commit `5246de2`(Developer)** |
 | 0.11 | event_queue.c 队列满覆盖(双 cond 阻塞 push) | `event_queue.c` | ✅ **commit `5246de2`(Developer)** |
-| 0.12 | **R-1 解法**:`queue_push` 阻塞改为 **timeout drop + WARN**(慢消费者掉包,不拖死 reactor) | `event_queue.c` | open(决议:不引入旁路喂狗 / 独立 dispatcher 线程,YAGNI) |
+| 0.12 | **R-1 解法**:`queue_push` 阻塞改为 **timeout drop + WARN** | `event_queue.{h,c}` (timeout=100ms,签名 void→int,加 `queue_get_drop_count()`) | ✅ **HEAD**(ez-router-engineer)。test-as-doc `tests/unit/test_queue_drop.c` 5/5 PASS |
 
 **交付**: 一个稳定的"基本透明转发器"(对应原目标 3)。
 **验收**:

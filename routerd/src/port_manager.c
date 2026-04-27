@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/un.h>
+#include <errno.h>
 
 #include "port_manager.h"
 #include "log.h"
@@ -341,6 +342,43 @@ port_def_t* port_find_by_fd(int fd)
 
 
 
+// PORT_TCP_SERVER 的 send 语义:广播给所有同名 PORT_TCP_CLIENT。
+// 设计契约(RPD 阶段 0.3,固化于 design-intent.md §3):
+//   reactor.c 在 accept 时把每个 client 的 base.name 设为 server 的 base.name(reactor.c:88-94)。
+//   因此 routes[].dst 配置成 tcp_server 端口名 = 通知所有连接到该 server 的 host。
+//   失败语义:任一 client 写失败 → 关闭它(让 reactor EPOLLIN==0 路径走 g_port_table 清理)
+//   + WARN 日志 + 继续给其他 client 发。至少一个成功返回 len,全部失败返回 -1,无 client 返回 0。
+//   非阻塞写后续:当前 fd 是阻塞 socket → 慢 client 会阻塞 reactor 一次写。
+//   PROJECT_CONTEXT v4 §14 不可阻塞契约的彻底解法(EAGAIN/旁路 dispatcher)放在阶段 1。
+static int port_send_tcp_server_broadcast(const port_def_t* server, const uint8_t* data, int len)
+{
+    int sent_to = 0;
+    int failed  = 0;
+    for (int i = 0; i < MAX_PORTS; i++) {
+        if (!g_port_table[i].used) continue;
+        port_def_t* cli = g_port_table[i].port;
+        if (!cli) continue;
+        if (cli->base.type != PORT_TCP_CLIENT) continue;
+        if (strcmp(cli->base.name, server->base.name) != 0) continue;
+
+        int n = write(cli->base.fd, data, len);
+        if (n < 0) {
+            LOG_WARN("[port_send] tcp_server '%s' broadcast: client fd=%d write failed, errno=%d\n",
+                     server->base.name, cli->base.fd, errno);
+            failed++;
+            // fd 真坏后续 reactor 会从 EPOLLIN read==0 走清理路径,这里不主动 close
+            // 避免与 reactor 的 g_port_table 操作竞态。
+            continue;
+        }
+        sent_to++;
+    }
+    LOG_INFO("[port_send] tcp_server '%s' broadcast: sent_to=%d failed=%d\n",
+             server->base.name, sent_to, failed);
+    if (sent_to == 0 && failed == 0) return 0;       // 当前无 client 连接
+    if (sent_to == 0)                  return -1;    // 全失败
+    return len;
+}
+
 int port_send(port_def_t* p, const uint8_t* data, int len)
 {
     if (!p || p->base.fd < 0) return -1;
@@ -369,7 +407,8 @@ case PORT_IPC_CLIENT:{
 }
 
 case PORT_TCP_SERVER:{
-    status=len;
+    // 见 port_send_tcp_server_broadcast 顶部契约
+    status = port_send_tcp_server_broadcast(p, data, len);
     break;
 }
 case PORT_IPC_SERVER:{

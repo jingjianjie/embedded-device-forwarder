@@ -23,13 +23,6 @@
 static int epfd = -1;
 static int reactor_fds[MAX_REACT_FDS];
 
-//
-// #define MAX_REACTOR_PORTS 128
-// static reactor_entry_t g_reactor_table[MAX_REACTOR_PORTS];
-// reactor_entry_t reactor_table[MAX_REACT_FDS] = {0};
-// static int g_client_fd=-1;
-// static int g_ipc_fd=-1;
-
 // 初始化 reactor
 void reactor_init(void)
 {
@@ -41,29 +34,9 @@ void reactor_init(void)
     LOG_INFO("[reactor] init ok\n");
 }
 
-// 注册已有的 fd
-// void reactor_add_fd(int fd)
-// {
-//     if (fd < 0) return;
-
-//     struct epoll_event ev;
-//     ev.events = EPOLLIN;
-//     ev.data.fd = fd;
-
-//     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
-
-//     // 放入 table
-//     for (int i = 0; i < MAX_REACT_FDS; i++) {
-//         if (reactor_table[fd].fd < 0) {
-//             reactor_table[fd].fd = fd;
-//             break;
-//         }
-//     }
-
-//     printf("[reactor] add fd=%d\n", fd);
-// }
-
 // 根据 port 打开 fd 并注册
+// 注:头文件仍 export,router_link.c 注释中调用 — 保留作为占位接口
+// (Chesterton's Fence:可能是计划恢复的"按端口名重建 epoll"路径)
 void reactor_add_fd_by_port(int port)
 {
     int fd = port_open_fd(port);
@@ -75,78 +48,11 @@ void reactor_add_fd_by_port(int port)
 }
 
 // 清空所有端口（用于清空路由）
+// 同上,头文件 export,router_link.c 注释中调用 — 保留占位
 void reactor_clear_all_ports(void)
 {
-    //int ipc_fd=ipc_server_fd();
-    // for (int i = 0; i < MAX_REACT_FDS; i++) {
-
-    //     int fd = reactor_fds[i];
-    //     if (fd >= 0) {
-    //         epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
-    //         close(fd);
-    //         reactor_fds[i] = -1;
-    //     }
-    // }
-
     LOG_INFO("[reactor] all ports cleared\n");
 }
-
-// reactor 主事件循环
-// void* reactor_thread(void* arg)
-// {
-//     struct epoll_event evs[16];
-//     printf("[reactor] thread started\n");
-
-//     while (1) {
-//         int n = epoll_wait(epfd, evs, 16, -1);
-//         if (n <= 0) continue;
-
-//         for (int i = 0; i < n; i++) {
-
-//             port_def_t* port=evs[i].data.ptr;
-//             int fd=port->base.fd;
-//             // ================================
-//             // ★ 普通数据端口读取路径
-//             // ================================
-//             uint8_t buf[1024];
-//             int len = read(fd, buf, sizeof(buf));
-
-//             if (len <= 0)
-//                 continue;
-
-//             printf("[reactor] recv from %s fd=%d len=%d\n",
-//              port->base.name, fd, len);
-
-//             printf("[reactor] data: %s\n",buf);
-
-//             route_def_t* routes[16];
-//             int n = config_find_routes_by_src(port->base.name, routes, 16);
-
-//             for (int i = 0; i < n; i++) {
-//                 route_def_t* r = routes[i];
-
-//                 plugin_handler_t handler=plugin_get_handler(r->handler);
-//                 int data_len=len;
-//                 if(handler){
-//                 data_len=handler(buf,len);// handler function
-//             }
-//             printf("Route: %s -> %s handler=%s plugin=%s\n",
-//                r->src, r->dst, r->handler, r->plugin);
-
-//             event_msg_t msg;
-//             // msg.dst=r->dst;
-//             memcpy(msg.dst,r->dst,sizeof(msg.dst));
-//             msg.len = data_len;
-//             memcpy(msg.data, buf, data_len);
-//             queue_push(&msg);
-
-//            printf("push message to queue\n");
-//         }
-//     }
-// }
-
-// return NULL;
-// }
 
 void* reactor_thread(void* arg)
 {
@@ -180,7 +86,10 @@ void* reactor_thread(void* arg)
 
                 // 建立新的 port_def_t 结构体用于 client_fd
                 port_def_t* client_port = calloc(1, sizeof(port_def_t));
-                strcpy(client_port->base.name, port->base.name);
+                // base.name 是 char[32];源/目同尺寸,但 strncpy + 显式 NUL
+                // 防止未来源不再保证 NUL 终结(防御性,统一风格)
+                strncpy(client_port->base.name, port->base.name, sizeof(client_port->base.name) - 1);
+                client_port->base.name[sizeof(client_port->base.name) - 1] = '\0';
                 client_port->base.fd = client_fd;
                 client_port->base.type = PORT_TCP_CLIENT;
                 reactor_add_port(client_port);
@@ -200,7 +109,9 @@ void* reactor_thread(void* arg)
                 port_def_t* client = calloc(1, sizeof(port_def_t));
 
                 // 继承 server 的逻辑名字（一般是 "HOST"）
-                strcpy(client->base.name, port->base.name);
+                // strncpy 防御性:base.name 是 char[32],源/目同尺寸
+                strncpy(client->base.name, port->base.name, sizeof(client->base.name) - 1);
+                client->base.name[sizeof(client->base.name) - 1] = '\0';
 
                 client->base.fd   = client_fd;
                 client->base.type = PORT_IPC_CLIENT;   // ✅ 正确
@@ -306,8 +217,6 @@ void reactor_clear_fds(){
         if(reactor_fds[i]>0){
             epoll_ctl(epfd, EPOLL_CTL_DEL,reactor_fds[i], NULL);
             reactor_fds[i]=-1;
-            // reactor_table[i].fd=-1;
-            // reactor_table[i].handler=NULL;
         }
     }
     reactor_unlock();
@@ -324,20 +233,9 @@ void reactor_add_fd(int fd){
 
     epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &ev);
     reactor_fds[fd]=fd;
-    // reactor_table[fd].fd=fd;
-    // reactor_table[fd].handler=h;
     reactor_unlock();
     LOG_INFO("[reactor] add fd=%d\n", fd);
 }
-
-// port_def_t* reactor_find_port(int fd)
-// {
-//     for (int i = 0; i < MAX_REACTOR_PORTS; i++) {
-//         if (g_reactor_table[i].used && g_reactor_table[i].fd == fd)
-//             return g_reactor_table[i].port;
-//     }
-//     return NULL;
-// }
 
 
 void reactor_add_port(port_def_t* port){

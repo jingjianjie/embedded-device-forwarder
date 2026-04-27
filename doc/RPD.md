@@ -95,7 +95,7 @@ ez_router 把其余全部包了。
 
 | # | 任务 | 文件 | 状态 |
 |---|---|---|---|
-| 0.1 | 修 plugin 返回值越界(可能栈溢出) | `routerd/src/reactor.c:241-252` | open |
+| 0.1 | 修 plugin 返回值越界(可能栈溢出) | `routerd/src/reactor.c:258-272` | ✅ **HEAD**(ez-router-engineer + test-as-doc `tests/unit/test_plugin_clamp.c`) |
 | 0.2 | `strcpy(addr.sun_path,...)` → `strncpy` | `ipc_server.c:33`、`reactor.c:182,202` | open |
 | 0.3 | 实现 TCP_SERVER 的 `port_send` | `port_manager.c:369-371` | open |
 | 0.4 | TCP/IPC client 断开时释放 `calloc` 的 `port_def_t` | `reactor.c:181,199,223-226` | ✅ **commit `5246de2`(Developer)** |
@@ -439,6 +439,8 @@ R1-R5 在 v1 草案评审时已敲定,记录于此供回溯。新的未决问题
 | # | 问题 | 决策点 |
 |---|---|---|
 | O1 | watchdog 在 daemon 退出时是否需要"停"? | 阶段 2 跑 `cat /sys/module/dw_wdt/parameters/nowayout`(若有)及 close-fd 实测;若 nowayout=Y,只能接受"daemon 一旦退出板子在 44s 内重启",作为运维约束写入 build_guide |
+| U1 | Unity 单测脚手架何时启动? | 阶段 0 收尾(0.2/0.3/0.5 完成后)或阶段 1 起手时。当前 `tests/unit/test_plugin_clamp.c` 是零依赖 test-as-doc,届时迁移到 Unity |
+| U2 | `reactor.c:217` 的 read 缓冲 off-by-one 是否单独立项? | 现状:`int len = read(fd, buf, sizeof(buf) - 1)` 留 `\0` 但传给 plugin 的 `len` 不含末尾,plugin 若按字符串语义会越界一字节。属于另一切面,本次未动,待评估优先级 |
 
 ---
 

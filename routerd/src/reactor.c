@@ -255,8 +255,24 @@ void* reactor_thread(void* arg)
                     route_def_t* r = routes[j];
                     plugin_handler_t handler = plugin_get_handler(r->handler);
                     int data_len = len;
-                    if (handler)
+                    if (handler) {
                         data_len = handler(buf, len);
+
+                        // 契约 5 (PROJECT_CONTEXT v2 / design-intent.md §4):
+                        // handler 就地写 buf,栈缓冲固定 1024 字节,
+                        // event_msg_t.data 也是 MAX_DATA。返回 >MAX_DATA 会越界,
+                        // 返回 <0 不是约定的有效长度。这里夹住,而不是 trust。
+                        if (data_len < 0) {
+                            LOG_WARN("[reactor] plugin %s returned %d, drop\n",
+                                     r->handler, data_len);
+                            continue;
+                        }
+                        if (data_len > MAX_DATA) {
+                            LOG_WARN("[reactor] plugin %s returned %d > MAX_DATA=%d, truncated\n",
+                                     r->handler, data_len, MAX_DATA);
+                            data_len = MAX_DATA;
+                        }
+                    }
 
                     event_msg_t msg;
 

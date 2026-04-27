@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v2`
+> **版本**: `v3`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -25,7 +25,7 @@
 
 ## 隐性契约(代码里没写但必须遵守)
 
-**5.[LM_1]** **插件 handler 当前签名 `int (*)(void* buf, int len)` 必须返回新长度,且不能扩展超过 `MAX_DATA = 1024`**(`routerd/include/event.h`)。当前 reactor 不校验返回值边界(`routerd/src/reactor.c:241-252`),返回 >1024 会栈溢出 — 阶段 0 任务 0.1 修复。**Why**: event_msg_t.data 固定 1024 字节,plugin 是数据流上的中间步骤,扩展边界由载体决定。
+**5.[LM_3]** **插件 handler 签名 `int (*)(void* buf, int len)` 必须返回新长度,且不能扩展超过 `MAX_DATA = 1024`**(`routerd/include/event.h`)。**reactor 已 clamp 越界返回值**(`routerd/src/reactor.c:258-272`):`<0` → drop,`>MAX_DATA` → truncate + WARN。plugin 仍应自律,越界即代表实现错误。**Why**: event_msg_t.data 固定 1024 字节,plugin 是数据流上的中间步骤,扩展边界由载体决定。**契约固化**: `tests/unit/test_plugin_clamp.c` 是 test-as-doc(`CLAUDE.md` §6.5),clamp 规则改动须同步改测试模型。**修复**: HEAD,RPD 阶段 0 任务 0.1 ✅。
 
 **6.[LM_1]** **新增端口类型必须改三处**:`config_store.c::parse_ports()` 加 case + `port_manager.c::port_open_single()/port_send()` 加 case + `reactor.c` 处理 fd 注册。漏改任一处会得到"配置能解析但端口不工作"的诡异 bug。**Why**: 端口抽象 `port_def_t` 是一个 enum 调度的 union 设计,无虚表,所以每个分支都要手动同步。
 

@@ -1,22 +1,32 @@
+// ipc_server.c — IPC 入口实现(RPD 阶段 1 C-2 切换到新协议)
+//
+// 数据流:
+//   accept() → 每连接独立 read buffer → 循环 proto_decode():
+//     INCOMPLETE → break inner loop, 继续 recv (契约 21)
+//     其他负值   → 断连(致命错误,流损坏)
+//     ok        → proto_dispatch()  → memmove 推进读指针
+//
+// buffer 大小: PROTO_HDR_SIZE + PROTO_MAX_PAYLOAD = 12 + 65536 ≈ 64 KiB,
+//   单个连接独占,放在 ipc_thread 的栈上(默认线程栈 8MB,足够)。
+//
+// 阻塞性: 当前 IPC 线程是阻塞 socket。慢客户端 recv 卡住只影响 IPC 线程,
+//   不直接影响 reactor。dispatch 内部 ACK write 也是阻塞,见 dispatcher
+//   文件头 TODO。
+
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include "ipc_server.h"
-#include "router_link.h"
-#include "config_store.h"
 #include <unistd.h>
 #include <errno.h>
-#include "reactor.h"
-#include "plugin_loader.h"
+#include "ipc_server.h"
+#include "protocol.h"
+#include "proto_dispatcher.h"
+#include "registry.h"
 #include "log.h"
 #include "run_state.h"
 
-#define CMD_SET_ROUTES    1
-#define CMD_CLEAR_ROUTES  2
-#define CMD_SAVE_CONFIG   3
-#define CMD_LOAD_PLUGIN   4
-#define CMD_UNLOAD_PLUGIN 5
+#define IPC_RECV_BUF_SIZE (PROTO_HDR_SIZE + PROTO_MAX_PAYLOAD)
 
 static int g_ipc_fd = -1;
 
@@ -43,141 +53,83 @@ int ipc_server_init(const char* sockpath)
     return fd;
 }
 
-void process_frame(uint8_t* buf,int n){
+// 单连接处理:阻塞读 → 循环 decode → dispatch。返回时连接已关闭。
+static void handle_client(int client_fd)
+{
+    uint8_t  buf[IPC_RECV_BUF_SIZE];
+    size_t   buf_len = 0;
 
-     if (n < sizeof(ipc_header_t)) {
-        LOG_INFO("[IPC] frame too small: %d bytes\n", n);
-        return;
-    }
-
-    ipc_header_t* hdr = (ipc_header_t*)buf;
-
-    if (hdr->magic != IPC_MAGIC) {
-        LOG_INFO("[IPC] invalid magic: 0x%X\n", hdr->magic);
-        return;
-    }
-
-    uint32_t payload_len = hdr->length;
-
-    if (sizeof(ipc_header_t) + payload_len > n) {
-        LOG_INFO("[IPC] incomplete frame: need %u bytes, got %d\n",
-               sizeof(ipc_header_t) + payload_len, n);
-        return;
-    }
-
-    uint8_t* payload = buf + sizeof(ipc_header_t);
-
-    // 分发给上层处理
-    ipc_handle_frame(hdr->cmd, payload, payload_len);
-}
-
-
-
-
-void* ipc_thread(void* arg){
-
-
-     LOG_INFO("[IPC] waiting for SDK...\n");
     while (run_state_is_running()) {
+        ssize_t n = recv(client_fd, buf + buf_len,
+                         IPC_RECV_BUF_SIZE - buf_len, 0);
 
-        int client_fd = accept(g_ipc_fd, NULL, NULL);
-        if (client_fd < 0) {
-            // sleep(10);
-            // perror("accept");
-            usleep(500*1000);
-            continue;
+        if (n == 0) {
+            LOG_INFO("[IPC] client fd=%d disconnected\n", client_fd);
+            break;
+        }
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            LOG_WARN("[IPC] recv fd=%d errno=%d\n", client_fd, errno);
+            break;
         }
 
-        LOG_INFO("[IPC] SDK connected, fd=%d\n", client_fd);
+        buf_len += (size_t)n;
 
-        //use long connect ,until broke
-        while (run_state_is_running()) {
-            uint8_t buf[4096];
-            int n = recv(client_fd, buf, sizeof(buf), 0);
+        // 流式 decode:可能一次 recv 含多帧,循环到 INCOMPLETE 为止
+        while (1) {
+            proto_frame_hdr_t hdr;
+            const uint8_t* payload = NULL;
+            int r = proto_decode(buf, buf_len, &hdr, &payload);
 
-            if (n > 0) {
-                process_frame(buf, n);
-            }
-            else if (n == 0) {
-                LOG_INFO("[IPC] SDK disconnected.\n");
-                close(client_fd);
-                break;  // 回到 accept 等下一次连接
-            }
-            else {
-                if (errno == EINTR)
-                    continue;
-
-                LOG_INFO("[IPC] recv error");
-                close(client_fd);
+            if (r == PROTO_ERR_INCOMPLETE) {
+                // 契约 21: 不是错误,继续 recv
                 break;
             }
+            if (r < 0) {
+                LOG_WARN("[IPC] decode err=%d on fd=%d, drop conn\n",
+                         r, client_fd);
+                buf_len = 0;
+                goto done;  // 致命解码错 → 断连
+            }
+
+            // 成功,r = 整帧字节数
+            proto_dispatch(client_fd, &hdr, payload);
+
+            // 推进读指针:把剩余字节移到 buf 头
+            size_t consumed = (size_t)r;
+            if (consumed < buf_len)
+                memmove(buf, buf + consumed, buf_len - consumed);
+            buf_len -= consumed;
         }
+
+        // buf 满但仍是 INCOMPLETE → 客户端发了超大帧或 buf 已塞满未消费
+        // (前者已被 PAYLOAD_TOO_LARGE 拦截,后者理论不发生因为 dispatch
+        //  会消费,但作为兜底加 sanity check)
+        if (buf_len == IPC_RECV_BUF_SIZE) {
+            LOG_WARN("[IPC] buffer full without progress on fd=%d, drop\n",
+                     client_fd);
+            break;
+        }
+    }
+
+done:
+    registry_unregister(client_fd);  // 槽位回收(可能未注册,registry 容错)
+    close(client_fd);
+}
+
+void* ipc_thread(void* arg)
+{
+    (void)arg;
+    LOG_INFO("[IPC] waiting for SDK...\n");
+
+    while (run_state_is_running()) {
+        int client_fd = accept(g_ipc_fd, NULL, NULL);
+        if (client_fd < 0) {
+            usleep(500 * 1000);  // 与原代码一致的非阻塞 accept 间隔
+            continue;
+        }
+        LOG_INFO("[IPC] client connected, fd=%d\n", client_fd);
+        handle_client(client_fd);
     }
     return NULL;
 }
-
-
-//-----------------------------------------------------------------
-// ipc-handle frame
-//----------------------------------------------------------------
-void ipc_handle_frame(uint16_t cmd, uint8_t* payload, uint32_t len)
-{
-    LOG_INFO("[IPC] cmd=%d\n",cmd);
-    switch (cmd) {
-
-    case CMD_SET_ROUTES: {
-        if (len < sizeof(int)) {
-            LOG_INFO("[IPC] SET_ROUTES payload too small\n");
-            return;
-        }
-
-        int count = *(int*)payload;
-        size_t expect = sizeof(int) + sizeof(ez_router_link_t) * count;
-
-        if (len < expect) {
-            LOG_INFO("[IPC] SET_ROUTES payload mismatch\n");
-            return;
-        }
-
-        // ez_router_link_t* links =
-        //     (ez_router_link_t*)(payload + sizeof(int));
-
-        LOG_INFO("[IPC] set routes\n");
-        // router_set_routes_from_ipc(links, count);
-        break;
-    }
-
-    //clear routes
-    case CMD_CLEAR_ROUTES:
-        LOG_INFO("clear routes\n");
-        break;
-
-    case CMD_SAVE_CONFIG:
-        // save_config_json();
-        break;
-
-    case CMD_LOAD_PLUGIN: {
-        uint32_t path_len = *(uint32_t*)payload;
-        if (len < sizeof(uint32_t) + path_len) return;
-
-        char* path = (char*)(payload + sizeof(uint32_t));
-        plugin_load(path);//load
-        LOG_INFO("load plugin\n");
-        break;
-    }
-
-    case CMD_UNLOAD_PLUGIN: {
-        uint32_t path_len = *(uint32_t*)payload;
-        if (len < sizeof(uint32_t) + path_len) return;
-
-        // char* path = (char*)(payload + sizeof(uint32_t));
-        // plugin_unload(path);
-        break;
-    }
-
-    default:
-        LOG_INFO("[IPC] unknown cmd=%d\n", cmd);
-        break;
-    }
-}
-

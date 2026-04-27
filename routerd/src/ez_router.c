@@ -11,6 +11,7 @@
 #include "port_manager.h"
 #include "log.h"
 #include "run_state.h"
+#include "registry.h"
 
 
 void* dispatcher_thread(void* arg)
@@ -51,6 +52,9 @@ int main(int argc,char* argv[])
     LOG_INFO("ez_router started");
 
     LOG_INFO("ez_router starting...\n");
+
+    // 初始化子程序注册表(C-2,无前置依赖)
+    registry_init();
 
     // 初始化插件系统
     // 初始化 reactor

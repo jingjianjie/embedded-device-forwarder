@@ -131,7 +131,8 @@ ez_router 把其余全部包了。
 
 **进度状态(v2 后追加,随阶段推进)**:
 - **C-1**(帧定义 + codec + 规约文档): ✅ HEAD,详见 `routerd/include/protocol.h`、`routerd/src/proto_codec.c`、`doc/router_protocol.md`、`tests/unit/test_proto_codec.c`(dev + target 双端 27/27 PASS)
-- **C-2**(`registry.h/c` + `proto_dispatcher.c` + 切换 `ipc_server.c` 用新 codec): open
+- **C-2**(`registry.h/c` + `proto_dispatcher.c` + 切换 `ipc_server.c` 用新 codec): ✅ HEAD,详见 `routerd/{include/registry.h,src/registry.c}`、`routerd/{include/proto_dispatcher.h,src/proto_dispatcher.c}`、改造后的 `routerd/src/ipc_server.c`(每连接 64KiB read buf + 流式 decode + INCOMPLETE 循环)、test-as-doc `tests/unit/test_registry.c`(27/27 PASS)+ `tests/unit/test_dispatcher.c`(18/18 PASS)+ 集成冒烟 `tests/unit/smoke_ipc_client.c`(target 上 REGISTER+ACK+HEARTBEAT 链路打通)
+- **阶段 1 整体闭合**:可推进阶段 2(子程序监管)/ 阶段 3(日志)。遗留:ACK write 阻塞(阶段 2 起前改非阻塞)、afl-fuzz 接入(R-9)。
 
 #### 1.1 帧格式
 
@@ -201,6 +202,9 @@ typedef struct __attribute__((packed)) {
 ---
 
 ### 阶段 2 — 子程序监管(优先)
+
+**前置项(必须在 supervisor 起手前完成)**:
+- **2.0 IPC 写非阻塞化** — 当前 `proto_dispatcher::send_register_ack` 是阻塞 `write()`,违反 PROJECT_CONTEXT v7 §24(契约 14 延伸)。改造:`O_NONBLOCK` + EAGAIN 上层重试 / 写队列降级。文件:`routerd/src/proto_dispatcher.c` + `routerd/src/ipc_server.c`
 
 #### 2.1 配置扩展
 
@@ -476,6 +480,9 @@ R1-R5 在 v1 草案评审时已敲定,记录于此供回溯。新的未决问题
 |---|---|---|
 | U1 | Unity 单测脚手架何时启动? | 阶段 0 收尾(0.2/0.3/0.5/0.12 完成后)**或**阶段 1 起手时。当前 `tests/unit/test_plugin_clamp.c` 是零依赖 test-as-doc,届时迁移到 Unity |
 | U2 | `reactor.c:217` read 缓冲 off-by-one 是否单独立项? | `int len = read(fd, buf, sizeof(buf) - 1)` 留 `\0` 但传给 plugin 的 `len` 不含末尾,plugin 按字符串语义会越界一字节。属于另一切面,待评估优先级 |
+| U7 | SDK / examples 在阶段 4 重写前会"软死"(包含旧 `ipc_header_t` 副本) | R-5 一刀切的预期。本次 C-2 已删 routerd 侧旧 `ipc_header_t`,SDK 侧 `sdk/ez_router_sdk.h` 仍有副本。是否需 deprecated marker 提示?或暂时禁用 examples 编译? |
+| U8 | 集成测试(pytest+paramiko)在 RPD §6.5 仍 open | 0.6 阶段任务。当前 `tests/unit/smoke_ipc_client.c` 是临时手工冒烟,应在 0.6 落地 conftest.py 与 fixture 时固化为 pytest 测试 |
+| U9 | 阶段 2 supervisor 与 registry 并发约定 | `registry_iterate` 把回调放在锁内执行;阶段 2 supervisor 检查心跳超时若在回调内做 `kill()` 会持锁过久(违反契约 14)。规则:**iterate 回调只能复制数据出来,kill / restart 在锁外做**(已记入 PROJECT_CONTEXT 条目 22) |
 | U3 | (R-1 衍生)是否需要"超时被丢"指标暴露给上位机? | 慢消费者长期被丢应被发现。建议在 IPC `STATS` 帧暴露每端口 drop 计数 |
 | U4 | (R-2 衍生)未来引入 zerocopy 旁路时的 API 设计 | 暂不做。未来上 SCM_RIGHTS + shm 时再设计 `ezr_send_shm()`,签名待定 |
 | U5 | (R-5 阶段 5)ez_router 自升级回滚执行体 | A/B slot vs 文件备份 + systemd Restart 计数。阶段 5 起手前定 |

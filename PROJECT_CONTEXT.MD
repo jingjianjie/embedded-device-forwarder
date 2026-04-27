@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v6`
+> **版本**: `v7`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -71,6 +71,8 @@
 
 **19.[LM_5]** **paramiko 4.0 的 `sftp.put()` 在 Windows + Armbian 组合下偶发 ENOENT**。`scripts/deploy_target.py` 已用流式写绕开:`with open(local,"rb") as src, sftp.open(remote,"wb") as dst: dst.write(src.read())`。**Why**: 协议握手 / 路径规范化的版本兼容问题,paramiko 4.0 改了 SFTP 实现。**How to apply**: 任何 dev → target 文件传输都走 `scripts/deploy_target.py` 的 `put` / `put_dir`,不要用 `sftp.put()`。**v6 补丁**: 流式 sftp.open 在某些路径仍偶发 ENOENT,有效 fallback 是 `ssh exec "base64 -d > /path"` + 客户端 base64 编码。等真的频繁触发时再内化进 `deploy_target.py`,目前手工 inline 已够用。
 
+**v7 补丁**: (a) 多文件批量传 fallback 走 `tar + base64 over ssh stdin` 比逐文件 base64 更省时;(b) **paramiko `ssh exec` 启动后台 daemon 必须用 `setsid bash -c '...' < /dev/null > /dev/null 2>&1`**,否则 `recv_exit_status()` 会一直挂(channel 不干净退出)。任何在 ssh 内启动 ez_router 做集成测试的脚本要遵守这条。
+
 ---
 
 ## 协议层契约(v6 新增,阶段 1 C-1 落地)
@@ -78,3 +80,13 @@
 **20.[LM_6]** **packed wire-format struct 必须用 `memcpy` 整头拷贝**,不通过结构指针按字段访问。**Why**: ARM (RK3588 / 嵌入式 ARM 普遍)对 packed struct 字段的 misaligned 访问可能触发 UB 或性能塌方;memcpy 是显式声明字节流意图的安全方式。**How to apply**: `proto_codec.c` 已示范(`memcpy(buf, hdr, PROTO_HDR_SIZE)`);后续 `proto_dispatcher.c` / SDK / `registry.c` 中**任何**接触 `proto_frame_hdr_t` 二进制流的地方,都按这套规则。**禁止**: `frame_ptr->cmd` 这类直接 cast + 解引用 buffer。
 
 **21.[LM_6]** **`PROTO_ERR_INCOMPLETE` 不是真错误**,是流式协议的正常状态(继续 `read()` 凑够帧)。区别于 `BAD_MAGIC` / `BAD_VERSION` / `PAYLOAD_TOO_LARGE` 这些**致命**错误(应断连或丢弃整个连接的缓冲区)。**Why**: 阶段 1 C-2 起的 dispatcher 在调用 `proto_decode()` 时如果把所有负值统一处理(比如都断连),会在正常的"读了一半"场景下错误断连,造成假性故障。**How to apply**: dispatcher / SDK 必须对 `INCOMPLETE` 与其他错误码分别处理。`doc/router_protocol.md` 错误码表已显式标注。
+
+---
+
+## Registry / IPC 并发(v7 新增,阶段 1 C-2 落地)
+
+**22.[LM_7]** **`registry_find_by_*` 借出内部指针,不是拷贝**。锁在返回前释放,**caller 不可在并发触发 `registry_unregister` 的情况下持指针**。当前 IPC 单线程消费场景下安全(同一 fd 的 register / find / unregister 都在同一线程串行),但**阶段 2 supervisor 上线时**(supervisor 线程 + IPC 线程并发)需要重新评估:若需长持元信息应**复制出来再用**,而不是持借用指针。**Why**: 短临界区是契约 14 的延伸(锁不可跨 IO / malloc / 业务逻辑),所以 registry API 不能在锁内做任何"长操作";代价就是返回的指针生命周期与 unregister 竞争。**How to apply**: 阶段 2 supervisor `iterate` 风格的回调内**只允许复制数据**(`memcpy(local_copy, entry, sizeof)`),`kill()` / 重启逻辑必须放到锁外做。
+
+**23.[LM_7]** **业务层边界可以比协议层更紧,但不可超过**。例: `parse_register_json` 的 4096 字节 ≤ `PROTO_MAX_PAYLOAD = 65536`。**Why**: 协议层 limit 是"传输层 DoS 防御"(避免恶意客户端宣称巨 payload 让接收方分配巨 buffer),业务层 limit 是"业务语义合理性"(REGISTER 帧 4 KiB JSON 已绰绰有余,更大代表客户端有问题)。两层都需要,且业务层必须更紧。**How to apply**: 后续 cmd 实现时(LOG / FW_CHUNK / DATA),各自内部应有业务上限,且 ≤ `PROTO_MAX_PAYLOAD`;不要图省事直接信任协议层 limit。
+
+**24.[LM_7]** **契约 14 的延伸:`dispatcher` / IPC 线程的 `write()` 也不可阻塞**。reactor 是最严的不可阻塞线程,但 IPC 线程虽然不喂 watchdog,仍是新连接 dispatch 的瓶颈;阻塞 `write()` 写慢客户端会让其他客户端的 REGISTER / HEARTBEAT 排队延迟。**Why**: C-2 当前 `proto_dispatcher::send_register_ack` 用阻塞 `write()`,文件头有 TODO 注释 — 这是已知的延伸违规,**阶段 2 supervisor 上线前必须修**(改非阻塞 socket + 写队列 / EAGAIN 处理)。**How to apply**: 阶段 2 第一项任务 = 把所有 IPC 写路径(ACK / 命令下发 / supervisor 主动通知)改非阻塞 + 上层重试或降级。

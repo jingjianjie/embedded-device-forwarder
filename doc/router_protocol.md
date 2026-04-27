@@ -1,10 +1,10 @@
 # ez_router 子程序协议规约
 
 > **版本**: 1
-> **状态**: 阶段 1 起手,**仅帧定义 + 编解码器**已落地(C-1)。registry / dispatcher 在 C-2。
+> **状态**: 阶段 1 **完整闭合**。C-1 codec + C-2 registry/dispatcher/IPC 切换均已落地,旧 `ipc_header_t` 在 routerd 侧删除(SDK 副本待阶段 4 一并淘汰)。
 > **范围**: 子程序 ↔ ez_router、上位机 ↔ ez_router 之间统一帧协议。
 > **决议引用**: RPD §5.1.1 / R-2 / R-3 / R-5。
-> **可执行真理**: `routerd/include/protocol.h` + `routerd/src/proto_codec.c` + `tests/unit/test_proto_codec.c`。本文档若与代码冲突,以代码为准。
+> **可执行真理**: `routerd/include/protocol.h` + `routerd/src/proto_codec.c` + `routerd/src/registry.c` + `routerd/src/proto_dispatcher.c` + `routerd/src/ipc_server.c` + 三个 test-as-doc(见 §8)。本文档若与代码冲突,以代码为准。
 
 ---
 
@@ -34,20 +34,20 @@ Offset  0       1       2       3       4       5       6       7       8       
 
 每个 cmd 段:**语义 / payload 形状 / 谁是发起方**。详细 schema 由 `proto_dispatcher`(C-2)校验。
 
-| 值 | 名 | 发起方 | payload 形状(概述) |
-|---:|---|---|---|
-| `0x01` | `PROTO_REGISTER` | 子程序 → router | 元信息 JSON(model / fw_version / device_id / ports[]),见 RPD §5.1.2 |
-| `0x02` | `PROTO_REGISTER_ACK` | router → 子程序 | `{ok, msg, assigned_id?}` JSON。`seq` 与 REGISTER 帧 seq 配对 |
-| `0x03` | `PROTO_HEARTBEAT` | 双向 | 空 payload(payload_len = 0)。心跳保活,不期待响应 |
-| `0x10` | `PROTO_DATA` | 双向 | 端口数据原文。前置端口名 / 路由元信息(具体 schema C-2 定) |
-| `0x11` | `PROTO_CMD` | 双向 | 命令调用与响应(子程序注册的命令回调) |
-| `0x20` | `PROTO_LOG` | 子程序 → router | 日志行,被 `log_sink`(阶段 3)消费 |
-| `0x30` | `PROTO_FW_BEGIN` | 上位机 → 子程序 | 升级元信息(总长度 / 校验 / 目标固件类型) |
-| `0x31` | `PROTO_FW_CHUNK` | 上位机 → 子程序 | `{offset, data}` 分片 |
-| `0x32` | `PROTO_FW_END` | 上位机 → 子程序 | `{checksum}` 完成 + 校验 |
-| `0x33` | `PROTO_FW_QUERY` | 双向 | 查询当前固件版本 / 升级状态 |
+| 值 | 名 | 发起方 | payload 形状(概述) | C-2 实现状态 |
+|---:|---|---|---|---|
+| `0x01` | `PROTO_REGISTER` | 子程序 → router | 元信息 JSON(必填: `device_id` / `model` / `fw_version` / `build_date`;可选: `ports[].name`),见 RPD §5.1.2 | ✅ 已实现:`registry_register` |
+| `0x02` | `PROTO_REGISTER_ACK` | router → 子程序 | `{"ok": true|false}`,seq 等于 REGISTER 帧 seq | ✅ 已实现:`proto_dispatcher.c::send_register_ack` |
+| `0x03` | `PROTO_HEARTBEAT` | 双向 | 空 payload。心跳保活,不期待响应 | ✅ 已实现:`registry_update_heartbeat` |
+| `0x10` | `PROTO_DATA` | 双向 | 端口数据原文 + 路由元信息(schema 阶段 2 定) | 🟡 stub:LOG_INFO,实现待阶段 2 |
+| `0x11` | `PROTO_CMD` | 双向 | 命令调用与响应 | 🟡 stub:LOG_INFO,实现待阶段 2 |
+| `0x20` | `PROTO_LOG` | 子程序 → router | 日志行 | 🟡 stub:LOG_INFO,实现待阶段 3 log_sink |
+| `0x30` | `PROTO_FW_BEGIN` | 上位机 → 子程序 | 升级元信息 | 🟡 stub:LOG_WARN,实现待阶段 5 |
+| `0x31` | `PROTO_FW_CHUNK` | 上位机 → 子程序 | `{offset, data}` 分片 | 🟡 stub,阶段 5 |
+| `0x32` | `PROTO_FW_END` | 上位机 → 子程序 | `{checksum}` | 🟡 stub,阶段 5 |
+| `0x33` | `PROTO_FW_QUERY` | 双向 | 查询固件版本 / 状态 | 🟡 stub,阶段 5 |
 
-**保留区**:`0x00` / `0x40-0xFF` 暂未分配。新增 cmd 必须**同步改 4 处**:`protocol.h` 枚举 + 本文档表 + dispatcher(C-2)+ 测试矩阵。
+**未知 cmd / 保留区(`0x00` / `0x40-0xFF`)**:dispatcher 容错 LOG_WARN + 不断连(`proto_dispatcher.c` 默认分支)。新增 cmd 必须**同步改 4 处**:`protocol.h` 枚举 + 本文档表 + dispatcher 分支 + 测试矩阵。
 
 ## 4. `seq` 字段语义(R-3 决议钉死)
 
@@ -83,7 +83,9 @@ Offset  0       1       2       3       4       5       6       7       8       
 | 长度字段 | `uint32_t length` | `uint32_t payload_len` |
 | reserved | `uint16_t` 占位 | 无 |
 
-**何时切换**:阶段 1 落地完整(C-1 codec + C-2 registry/dispatcher + IPC server 切换到新 codec)后,旧 `ipc_server.c` / `ipc_header_t` 一次性删除,**不保留 shim**(R-5)。`sdk/ez_router_sdk.h` 与 `examples/` 在阶段 4 SDK 重写时同步淘汰。
+**已切换**(C-2):routerd 侧 `routerd/include/ipc_server.h` 与 `routerd/src/ipc_server.c` 已**完全删除**旧 `ipc_header_t` / `IPC_MAGIC` / `ez_router_link_t` / `ipc_payload_*` / `process_frame()` / `ipc_handle_frame()`。新 IPC 主循环走 `proto_decode → proto_dispatch`,见 `routerd/src/ipc_server.c::handle_client`(单连接独立 64KiB read buffer + INCOMPLETE 循环 read,契约 21)。
+
+**SDK 副本**(`sdk/ez_router_sdk.h` 内的 `ipc_header_t`)未删除 — 阶段 4 SDK 重写时一并淘汰。届时 SDK 客户端连接 routerd 会因协议不识别被断连(R-5 一刀切),这是预期行为。
 
 **字面字节差异**(均为 LE):
 ```
@@ -111,16 +113,19 @@ Offset  Bytes              Meaning
 
 ## 8. 参考实现 / 测试
 
-- 头文件: `routerd/include/protocol.h`
-- 编解码: `routerd/src/proto_codec.c` (~70 行)
-- 单测: `tests/unit/test_proto_codec.c`(12 个 case,27 个断言;dev x86-64 + target aarch64 双侧 PASS)
-- 编译运行(单测,从仓库根目录):
-  ```
-  gcc -Wall -Wextra -I routerd/include routerd/src/proto_codec.c tests/unit/test_proto_codec.c -o /tmp/test_proto_codec
-  /tmp/test_proto_codec
-  ```
+- 帧定义: `routerd/include/protocol.h`
+- 编解码: `routerd/src/proto_codec.c`
+- 注册表: `routerd/include/registry.h` + `routerd/src/registry.c`(32 槽,pthread_mutex 短临界区,JSON 解析锁外做)
+- 分发器: `routerd/include/proto_dispatcher.h` + `routerd/src/proto_dispatcher.c`(REGISTER/HEARTBEAT 已实现,DATA/CMD/LOG/FW_* 占位)
+- IPC 入口: `routerd/src/ipc_server.c`(每连接独立 64KiB read buffer + 流式 decode)
+- 单测(test-as-doc,target aarch64 PASS):
+  - `tests/unit/test_proto_codec.c` — 27/27 codec 行为
+  - `tests/unit/test_registry.c` — 27/27 注册表行为(register/unregister/find/heartbeat/overflow/conflict/malformed)
+  - `tests/unit/test_dispatcher.c` — 18/18 分发行为(ACK seq 关联、心跳更新、未知 cmd 容错)
+- 集成冒烟: `tests/unit/smoke_ipc_client.c`(临时,target 上跑通 REGISTER + ACK + HEARTBEAT 完整链路)
 
 ## 9. 待解决
 
-- C-2 registry / dispatcher 形状(本文档将随之扩展 cmd payload schema 段)
-- fuzz 接入(R-9):afl-fuzz 喂任意字节流给 `proto_decode`,验证不 crash 不越界(阶段 1 收尾时跑 1h)
+- ACK / 数据 write 当前是阻塞 socket。慢客户端会卡住 IPC 线程(reactor 不直接受影响,但 IPC 线程卡住后续连接的 dispatch 会延迟)。**阶段 2 起前**改非阻塞 socket + 写队列(契约 14)。
+- fuzz 接入(R-9):afl-fuzz 喂任意字节流给 `proto_decode`,验证不 crash 不越界(阶段 1 收尾时跑 1h)。
+- DATA / CMD / LOG / FW_* schema 由阶段 2/3/5 各自模块上线时填本文档。

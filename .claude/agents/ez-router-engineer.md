@@ -54,16 +54,19 @@ memory/
 
 ## 工作启动时(每次)
 
-1. **必读** `memory/INDEX.md`
-2. 根据任务类型读相关 canonical 文件 + `PROJECT_CONTEXT.MD` + `project-structure-guide.md`
-3. 用户的任务如果触及已记录的隐性契约 → **主动指出**,避免重复踩坑
-4. memory 可能过时 → 涉及具体代码细节时**以源码为准**,然后在 `<人类待办>` 里提请更新 memory
+1. **必读** `CLAUDE.md`(项目级守则 — Claude Code **不会**自动注入 subagent 上下文,必须自己 Read。最重要的是 §1.2 复述、§1.7 人类待办、§10 subagent 限制)
+2. **必读** `memory/INDEX.md`
+3. 根据任务类型读相关 canonical 文件 + `PROJECT_CONTEXT.MD` + `project-structure-guide.md` + 相关 `doc/RPD.md` 段落
+4. 用户的任务如果触及已记录的隐性契约 → **主动指出**,避免重复踩坑
+5. memory 可能过时 → 涉及具体代码细节时**以源码为准**,然后在 `<人类待办>` 里提请更新 memory
 
 ## 工作完成时(每次会话末尾)
 
 **不直接写 canonical 文件**。改而**只写一个独立的 inbox 文件**:
 
 文件路径: `memory/inbox/<YYYY-MM-DD>T<HH-MM>_<sid8>.md`
+
+**关键**: 时间戳必须用 `date -Iseconds`(或 `date +%Y-%m-%dT%H-%M`)**取真实时间,不准猜测**(否则 dream 时按时间戳排序会乱序)。
 
 获取 `<sid8>`(当前会话 jsonl 短哈希):
 ```bash
@@ -72,14 +75,19 @@ ls -t ~/.claude/projects/F--013-device-forwarder-embedded-device-forwarder/*.jso
 # 或在 Windows 上:
 ls -t /c/Users/win/.claude/projects/F--013-device-forwarder-embedded-device-forwarder/*.jsonl | head -1
 # 取文件名前 8 字符(uuid 前缀)作为 <sid8>
+
+# 拼文件名:
+TS=$(date +%Y-%m-%dT%H-%M)        # 真实当前时间
+SID8=2c535370                       # jsonl 前 8 字符
+echo "memory/inbox/${TS}_${SID8}.md"
 ```
 
-inbox 文件内容:
+inbox 文件内容(**timestamp 用 `date -Iseconds` 探,不准猜**):
 
 ```markdown
 ---
 session_jsonl: <绝对路径到 .jsonl>
-timestamp: 2026-04-27T16:30:00
+timestamp: 2026-04-27T23:34:18+08:00   # 来自 `date -Iseconds`,真实时间
 status: pending          # pending | dreamed
 ---
 

@@ -2,7 +2,16 @@
 
 > **范围**: ez_router 的下一阶段演进。现有代码量小,**直接重构,不保留任何前向兼容**。
 > **目标读者**: 接手本项目的工程师 / 协助硬件协调的同事。
-> **状态**: 草案 v1。需评审后冻结。
+> **状态**: **v2(冻结)**。下次结构性变更时升 v3。
+> **变更摘要 v1 → v2**: 吸收 `doc/reviews/rpd-v1-2026-04-27.md` 的 R-1~R-10 + target 可行性 probe 发现,具体:
+> - R-1 reactor 不可阻塞契约 → 阶段 0 新增任务 0.12(`queue_push` 改 timeout drop+WARN)
+> - R-2/R-4 SDK zerocopy 与 SEQPACKET 冲突 → **删除 zerocopy 承诺**(YAGNI)
+> - R-3 `seq` 语义钉死:**发送方递增,接收方仅用于 ACK 关联**,不查重
+> - R-5~R-9 5 项 medium 列入"阶段 1 进行中并行修订"(§9 待解决)
+> - R-10 valgrind 验收注明"loopback 满流量负载"
+> - **/var/log = zram 50MB volatile**(armbian-ramlog) → 持久化日志改写 `/var/lib/ez_router/log/`
+> - **O1 闭合**:实测 `# CONFIG_WATCHDOG_NOWAYOUT is not set`,daemon close 不会触发整板重启,移到已决议 R6
+> - C# SDK TFM:`net8.0` only(R2 早已敲定)
 
 ---
 
@@ -36,6 +45,7 @@ ez_router 把其余全部包了。
 3. **测试与实现等重**: 每个阶段的产出 = 实现代码 + 自动化测试。无测试不算完成。
 4. **测试先在 dev 机跑单测,再 SCP 到 OrangePi 跑集成**: 见 §6。
 5. **硬件相关测试需要真设备时,在工单里 @人**: 见 §7。
+6. **运行时热加载非目标**(R-8 决议): 改 `config.json` 或路由表 = 重启 daemon。SDK 提供的 IPC 接口仅用于上位机控制平面(命令下发、查询状态),不接受路由结构变更请求。
 
 ---
 
@@ -106,9 +116,14 @@ ez_router 把其余全部包了。
 | 0.9 | port_manager.c TCP listen 失败缺 return | `port_manager.c:127` | ✅ **commit `5246de2`(Developer)** |
 | 0.10 | reactor.c read 缓冲区 off-by-one | `reactor.c:215` | ✅ **commit `5246de2`(Developer)** |
 | 0.11 | event_queue.c 队列满覆盖(双 cond 阻塞 push) | `event_queue.c` | ✅ **commit `5246de2`(Developer)** |
+| 0.12 | **R-1 解法**:`queue_push` 阻塞改为 **timeout drop + WARN**(慢消费者掉包,不拖死 reactor) | `event_queue.c` | open(决议:不引入旁路喂狗 / 独立 dispatcher 线程,YAGNI) |
 
 **交付**: 一个稳定的"基本透明转发器"(对应原目标 3)。
-**验收**: 单测 100% 通过 + 集成 loopback 跑 1 小时无泄漏(valgrind on target)。
+**验收**:
+- 单测 100% 通过 + 集成 loopback 跑 1 小时无泄漏(valgrind on target)
+- **valgrind 期间必须跑 loopback 满流量**(R-10 修订),不接受空跑
+- dev 机用 `make CFLAGS="-fsanitize=address" test-unit` 作为单测门禁
+- e2e 验收增"慢消费者灌满队列 → 行为定义清楚":push 超时 N ms 后 drop+WARN,reactor 持续运转
 
 ---
 
@@ -138,11 +153,17 @@ typedef struct __attribute__((packed)) {
     uint16_t magic;
     uint8_t  version;
     uint8_t  cmd;
-    uint32_t seq;
+    uint32_t seq;          // R-3: 发送方递增的消息序号,接收方仅用于 ACK 关联,不查重不做幂等
     uint32_t payload_len;
     uint8_t  payload[];
 } proto_frame_t;
 ```
+
+**`seq` 字段语义(R-3 决议,v2 钉死)**:
+- 由**发送方**单调递增分配;每个发送方持有独立计数器
+- 接收方**只**用于 ACK / 响应帧的关联(REGISTER ↔ REGISTER_ACK)
+- **不**用于查重 / 幂等 / 排序保证;业务层有需要自己加幂等键
+- 发送方重启后从 0 重新计数(无需持久化)
 
 #### 1.2 注册载荷(JSON)
 
@@ -210,11 +231,16 @@ typedef struct __attribute__((packed)) {
 
 ### 阶段 3 — 统一日志
 
+> **重要前提(v2)**: target `/var/log` 由 `armbian-ramlog` 挂载到 zram1(50 MB volatile,断电丢失)。这意味着:
+> - **不要写 `/var/log`** 当作持久化目标 — 会丢
+> - 持久化目录使用 **`/var/lib/ez_router/log/`**(写入 SD 卡,但寿命压力可接受 — mmcblk1 baseline 6w 上电写 4.4 GB,远低于消耗阈值)
+> - zram 反过来对**纯诊断日志**仍可用(systemd unit 的 stderr 自动被 journald + zram 收),无需双写
+
 #### 3.1 模块
 
 | 新建 | 职责 |
 |---|---|
-| `routerd/src/log_sink.c` | 内存 ring(默认 4 MB),双触发刷盘,文件滚动,信号强刷 |
+| `routerd/src/log_sink.c` | 内存 ring(默认 4 MB),双触发刷盘到 `/var/lib/ez_router/log/`,文件滚动,信号强刷 |
 | `routerd/src/log_dedup.c` | 同秒重复消息合并 |
 
 #### 3.2 子程序 API(在 SDK 里)
@@ -226,7 +252,7 @@ ezr_log(h, EZR_LOG_INFO, "tag", "x=%d", x);
 子程序无文件 IO、无路径配置,只管打。
 
 **交付**: TF 卡友好的统一日志(对应原目标 7)。
-**验收**: 24 小时 soak、`/sys/block/mmcblk0/stat` 写入次数 < 上限阈值、SIGKILL 时丢失 ≤ 1 个 batch。
+**验收**: 24 小时 soak、`/sys/block/mmcblk1/stat`(注意是 mmcblk1 不是 mmcblk0)写入字节数增量 < 阈值、SIGKILL 时丢失 ≤ 1 个 batch。
 
 ---
 
@@ -239,19 +265,20 @@ ezr_handle_t h = ezr_connect("/run/ez_router/ez_router.sock");
 ezr_register(h, &(ezr_meta_t){...});
 ezr_set_cmd_handler(h, on_cmd);
 ezr_send(h, "DEV_UART", buf, len);
-ezr_send_zerocopy(h, "HOST", fd, off, len);  // 走 splice/sendfile
 ezr_log(h, EZR_LOG_INFO, "tag", "...");
 ```
+
+> **R-2 决议(v2)**: 删除 `ezr_send_zerocopy(fd, off, len)` 接口。理由:AF_UNIX SOCK_SEQPACKET 与 splice/sendfile 不能直接对接(splice 仅 pipe 一端可用),而保留 SEQPACKET 的边界保证比 zerocopy 性能优化更重要(YAGNI)。**未来若图像/大数据吞吐成为瓶颈**,再引入旁路通道(SCM_RIGHTS + 共享内存 / 命名管道),不影响协议主链路。
 
 #### 4.2 C# SDK(全新)
 
 - TFM: **`net8.0` only**(上位机统一 .NET 8,无需兼容老框架)
 - `Task<int> SendAsync(string port, ReadOnlyMemory<byte> data, CancellationToken ct)`
-- 大数据零拷贝路径: `ArrayPool<byte>.Shared` + `PipeReader/Writer`
+- 大数据**朴素 memcpy 路径**(R-2 删 zerocopy 后);上位机端的 `ArrayPool<byte>.Shared` 仍可用于减少 GC 压力,但不再承诺零拷贝
 - NuGet 包名: `EmbeddedDeviceRouter.Sdk`
 
 **交付**: 嵌入端 + 上位机的统一编程接口(对应原目标 4)。
-**验收**: SDK 单测、图像吞吐 benchmark(对比朴素 `byte[]` 路径)、跨平台冒烟。
+**验收**: SDK 单测、跨平台冒烟。
 
 ---
 
@@ -433,14 +460,26 @@ R1-R5 在 v1 草案评审时已敲定,记录于此供回溯。新的未决问题
 | R3 | 插件 segfault 是否必须不连累 router? | **接受连累**。由 hw watchdog 整板复位重启,简化设计。 |
 | R4 | 是否双写 journald? | **不双写**,只用自管 log_sink。systemd unit 的 stderr 仍会被 journald 收(自动),无需主动配置。 |
 | R5 | 协议演进策略? | **第一版激进设计,不预留兼容字段**;后续靠帧头 `version` bump。现有代码量小直接重构。 |
+| R6 | watchdog 在 daemon 退出时是否需要"停"?(原 O1) | **闭合**: 实测 `/boot/config-*` 中 `# CONFIG_WATCHDOG_NOWAYOUT is not set` → close fd 不会触发整板复位,daemon 可正常启停。开发期间无需特殊处理 |
+| R-1 | reactor 不可阻塞契约 + queue_push 阻塞策略 | **timeout drop + WARN**(阶段 0.12)。慢消费者掉包合理,reactor 永不阻塞。不引入旁路喂狗 / 独立 dispatcher 线程(YAGNI) |
+| R-2/R-4 | SOCK_SEQPACKET 与 zerocopy 冲突 | **删除 SDK zerocopy 承诺**,保留 SEQPACKET 边界。未来需要时上 SCM_RIGHTS + shm 旁路通道 |
+| R-3 | 帧头 `seq` 字段语义 | **发送方递增,接收方仅用于 ACK 关联,不查重不做幂等**。重启计数从 0 复位 |
+| R-zram | `/var/log` 是 zram volatile,RPD §3 设计前提 | **接受 zram volatile**,持久化日志改写 `/var/lib/ez_router/log/`;诊断日志走 stderr → journald + zram(自动)|
 
-### 待解决
+### 待解决(阶段 1 进行中并行修订)
 
 | # | 问题 | 决策点 |
 |---|---|---|
-| O1 | watchdog 在 daemon 退出时是否需要"停"? | 阶段 2 跑 `cat /sys/module/dw_wdt/parameters/nowayout`(若有)及 close-fd 实测;若 nowayout=Y,只能接受"daemon 一旦退出板子在 44s 内重启",作为运维约束写入 build_guide |
-| U1 | Unity 单测脚手架何时启动? | 阶段 0 收尾(0.2/0.3/0.5 完成后)或阶段 1 起手时。当前 `tests/unit/test_plugin_clamp.c` 是零依赖 test-as-doc,届时迁移到 Unity |
-| U2 | `reactor.c:217` 的 read 缓冲 off-by-one 是否单独立项? | 现状:`int len = read(fd, buf, sizeof(buf) - 1)` 留 `\0` 但传给 plugin 的 `len` 不含末尾,plugin 若按字符串语义会越界一字节。属于另一切面,本次未动,待评估优先级 |
+| U1 | Unity 单测脚手架何时启动? | 阶段 0 收尾(0.2/0.3/0.5/0.12 完成后)**或**阶段 1 起手时。当前 `tests/unit/test_plugin_clamp.c` 是零依赖 test-as-doc,届时迁移到 Unity |
+| U2 | `reactor.c:217` read 缓冲 off-by-one 是否单独立项? | `int len = read(fd, buf, sizeof(buf) - 1)` 留 `\0` 但传给 plugin 的 `len` 不含末尾,plugin 按字符串语义会越界一字节。属于另一切面,待评估优先级 |
+| U3 | (R-1 衍生)是否需要"超时被丢"指标暴露给上位机? | 慢消费者长期被丢应被发现。建议在 IPC `STATS` 帧暴露每端口 drop 计数 |
+| U4 | (R-2 衍生)未来引入 zerocopy 旁路时的 API 设计 | 暂不做。未来上 SCM_RIGHTS + shm 时再设计 `ezr_send_shm()`,签名待定 |
+| U5 | (R-5 阶段 5)ez_router 自升级回滚执行体 | A/B slot vs 文件备份 + systemd Restart 计数。阶段 5 起手前定 |
+| R-5 | 阶段 5 固件升级回滚机制不完整(原 review R-5) | 同 U5 |
+| R-6 | 插件崩溃 → 整板复位决议无 HIL 验收(原 review R-6) | 阶段 6 加 HIL 测试:段错误注入插件,实测板子在 44s 内复位。需人协调示波器 / 串口监控 |
+| R-7 | 阶段 2 指数退避无上界(原 review R-7) | `supervisor.c` 实现时配置 `restart_backoff_max_ms`(建议 30s)|
+| R-8 | "运行时热加载非目标"未在 RPD 显式声明 | RPD §2 重构原则:**运行时热加载非目标,改配置 = 重启 daemon**(本条记录即为生效) |
+| R-9 | fuzz 不够常态化 | 阶段 1 codec 完成后,nightly CI 跑 `afl-fuzz` 对 `proto_decode`;阶段 5 也加 fuzz 升级帧解码 |
 
 ---
 

@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v3`
+> **版本**: `v4`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -50,3 +50,15 @@
 **12.[LM_2]** **存在并行开发者**。2026-04-27 我们做仓库清理 + RPD + agent 基建期间,远端被推入 commit `5246de2`(Author: `Developer <developer@example.com>`),修了 RPD 阶段 0 中 0.4 + 顺手解决了 0.6 队列溢出 + 自带 4 项我们没列入的 bug 修复(NULL 解引用顺序、PORT_IPC_SERVER fallthrough、TCP listen 错误路径、read off-by-one)。**Why**: 项目原本被认为"没人懂",但实际上有人在并行修 bug。**How to apply**: (a) 工作开始前必 `git fetch` 并查 origin/main 是否有新 commit;(b) 委派 agent 任务前**先核对 RPD 阶段表的状态列**,不要重复劳动;(c) 长会话中也建议中途 fetch 一次,降低撞车概率;(d) 重要重构(如 rename / 大移动)开工前在 issue / chat 知会团队。
 
 **13.[LM_2]** **rename + 远端并行修改的合并方式 = `git rebase origin/main`**。Git 的 rename 检测会自动把对方对旧文件名的修改 forward 到新文件,前提是行级别不重叠。本次 `ez_routerd.c → ez_router.c` 的 rename 与 Developer 对 `ez_routerd.c` 的 `unistd.h` / `return NULL` 改动通过 rebase 干净合并(commit `9b072ba` 之前)。**Why**: 决策时间 2026-04-27,作为后续遇到类似撞车的标准动作。**How to apply**: 不要 force push、不要 `--allow-unrelated-histories`,先 rebase,冲突时停下来手工解。
+
+---
+
+## 运行时不变量(v4 新增)
+
+**14.[LM_4]** **reactor 线程不可被任何 send 路径阻塞**。reactor 是 epoll 单线程消费,如果 `port_send` / `queue_push` 阻塞它,整个 epoll 循环卡死,所有端口卡死。**Why**: 决议 R3 的兜底前提是"reactor 卡死后被 hw watchdog 复位",但 reactor 还在跑就还在喂狗 → watchdog 永不超时 → 整板假死。**How to apply**: (a) `queue_push` 必须 timeout drop+WARN(RPD 阶段 0.12 / R-1);(b) `port_send` 写慢 TCP 客户端时,要么走 EAGAIN 非阻塞 + 上层重试,要么直接丢包;(c) 任何新引入的"等待"操作都要在 reactor 线程外做。**Source**: `doc/reviews/rpd-v1-2026-04-27.md` C-A,commit `5246de2` 把"队列覆盖"切面转移到了"reactor 阻塞"切面。
+
+**15.[LM_4]** **`/var/log` 在 target 上是 zram volatile**(armbian-ramlog 默认 50 MB,断电丢失)。**Why**: Armbian 默认配置,目的是减少 SD 卡写入。**How to apply**: ez_router 持久化日志写 **`/var/lib/ez_router/log/`**(SD 卡,但 mmcblk1 baseline 6w 上电只写 4.4 GB,寿命压力可接受);诊断日志走 stderr 让 systemd journald 自动收(也走 zram,断电丢失但运行时可读);**不要**把 `/var/log/ez_router.log` 当持久存储。
+
+**16.[LM_4]** **协议帧 `seq` 字段是发送方递增计数**。接收方仅用于 ACK/响应帧关联(REGISTER ↔ REGISTER_ACK),**不**做查重 / 幂等 / 排序保证。发送方重启后从 0 复位。**Why**: R-3 决议(`doc/RPD.md` §9 / `doc/reviews/rpd-v1-2026-04-27.md` C-C)。R5 激进无兼容字段原则下,后期改 seq 语义比加字段还贵,所以现在就钉死。**How to apply**: 实现 `proto_codec.c` 时按本契约;业务层若需要幂等,自加幂等键到 payload。
+
+**17.[LM_4]** **运行时热加载是 non-goal**。改 `config.json` / 路由表 / 端口配置 = 重启 daemon。**Why**: R-8 决议(RPD §2 第 6 条)。SDK 的 IPC 接口仅用于上位机控制平面(下发命令、查询状态),**不接受路由结构变更请求**。**How to apply**: 不要把 `ezr_set_routes` 之类的 API 重新引入;`config_store.c` 的解析路径不需要并发安全(只在启动时走一次)。

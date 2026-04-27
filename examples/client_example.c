@@ -81,7 +81,7 @@ int main()
     example_register();
 
     printf("\nRoutes registered successfully.\n");
-    printf("请查看 routerd 的日志输出以验证路由是否生效。\n");
+    printf("请查看 ez_router 的日志输出以验证路由是否生效。\n");
 
     return 0;
 }

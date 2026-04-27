@@ -1,9 +1,9 @@
 #!/bin/bash
-# manage_ezrouterd.sh - 管理 ez_routerd 守护进程
+# manage_ez_router.sh - 管理 ez_router 守护进程
 
-SERVICE_NAME=ez_routerd
+SERVICE_NAME=ez_router
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BIN_SRC="$SCRIPT_DIR/../out/ez_routerd"
+BIN_SRC="$SCRIPT_DIR/../out/ez_router"
 BIN_DST="/usr/local/bin/$SERVICE_NAME"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 
@@ -187,6 +187,6 @@ case "$1" in
         disable_now
         ;;
     *)
-        echo "用法: sudo ./manage_ezrouterd.sh [install|uninstall|start|stop|status|disable-now]"
+        echo "用法: sudo ./manage_ez_router.sh [install|uninstall|start|stop|status|disable-now]"
         ;;
 esac

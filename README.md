@@ -94,7 +94,7 @@
 
 ## 4.插件编译and使用
   
-  插件编译： 进入ez_router下的plugins目录执行 make   编译后的插件会自动放到out/plugin/
+  插件编译： 进入仓库根目录下的 plugins 目录执行 make ，编译后的插件会自动放到 out/plugin/
   插件配置： config.json中配置插件内容如下，plugins中填写插件名称及所在目录，在要拦截数据的地方配置插件的handler，
   按照${插件名}.${函数名} 
 

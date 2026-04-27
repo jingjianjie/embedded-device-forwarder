@@ -6,10 +6,10 @@ CFLAGS = -Wall -pthread -Iinclude -rdynamic
 OUT_DIR = ../out
 
 # 目标文件
-TARGET = $(OUT_DIR)/ez_routerd
+TARGET = $(OUT_DIR)/ez_router
 
 # 源文件
-SRCS = src/ez_routerd.c \
+SRCS = src/ez_router.c \
 	src/reactor.c \
 	src/router_link.c \
 	src/ipc_server.c \

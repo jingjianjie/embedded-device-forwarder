@@ -48,9 +48,9 @@ int main(int argc,char* argv[])
     }
     log_init(enable_log, level);
 
-    LOG_INFO("ez_routerd started");
+    LOG_INFO("ez_router started");
 
-    LOG_INFO("ez_routerd starting...\n");
+    LOG_INFO("ez_router starting...\n");
 
     // 初始化插件系统
     // 初始化 reactor
@@ -95,7 +95,7 @@ int main(int argc,char* argv[])
 
     //control plane: ipc command handler
     //pthread_create(&th_ipc,NULL,ipc_thread,NULL);
-    LOG_INFO("ez_routerd ready.\n");
+    LOG_INFO("ez_router ready.\n");
 
 
     while (run_state_is_running()) {

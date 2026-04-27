@@ -21,9 +21,9 @@ int main()
         return 1;
     }
 
-    printf("Connected to ez_routerd!\n");
+    printf("Connected to ez_router!\n");
 
-    const char* msg = "hello routerd";
+    const char* msg = "hello ez_router";
     send(fd, msg, strlen(msg), 0);
 
     event_msg_t ev;

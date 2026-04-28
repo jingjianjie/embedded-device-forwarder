@@ -12,6 +12,7 @@
 #include "log.h"
 #include "run_state.h"
 #include "registry.h"
+#include "supervisor.h"
 
 
 void* dispatcher_thread(void* arg)
@@ -55,6 +56,10 @@ int main(int argc,char* argv[])
 
     // 初始化子程序注册表(C-2,无前置依赖)
     registry_init();
+
+    // 初始化 supervisor(D-1 skeleton:SIGCHLD=SIG_IGN + 空表)
+    // 暂不接 config.json,也不调用 spawn — D-2 集成 subprocesses[] 时再加
+    supervisor_init();
 
     // 初始化插件系统
     // 初始化 reactor
@@ -102,8 +107,14 @@ int main(int argc,char* argv[])
     LOG_INFO("ez_router ready.\n");
 
 
+    // 主线程的"周期巡检"循环。
+    // D-1: 仅心跳超时检测(LOG_WARN);timeout 5s 是 skeleton 默认,D-2 会
+    // 改为读 config.json 的 subprocesses[].heartbeat_timeout_ms 做 per-child。
+    // 5s 选取依据:smoke 期望 5s+ 看到 WARN(本会话方案约定)。
+    const uint64_t HB_TIMEOUT_MS = 5000;
     while (run_state_is_running()) {
         sleep(1);
+        supervisor_check_heartbeats(HB_TIMEOUT_MS);
     }
 
     pthread_join(th_reactor, NULL);

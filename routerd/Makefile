@@ -16,6 +16,7 @@ SRCS = src/ez_router.c \
 	src/proto_codec.c \
 	src/proto_dispatcher.c \
 	src/registry.c \
+	src/supervisor.c \
 	src/event_queue.c \
 	src/router_core.c \
 	src/port_map.c \

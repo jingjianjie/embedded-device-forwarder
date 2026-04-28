@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT — embedded-device-router
 
-> **版本**: `v7`
+> **版本**: `v8`
 > **维护规则**: 见 `CLAUDE.md` §4。修改时自增版本号,新条目用最新版本号 `[LM_<v>]` 标记。
 > **可写者**: 主 agent + 人类。**subagent 只读**(见 `CLAUDE.md` §10.1)。
 > **侧重**: 改动背后的**意图/背景/隐性契约**,不记录易过时的具体细节(那些放 `git log` / `RPD` / 代码注释里)。
@@ -73,6 +73,8 @@
 
 **v7 补丁**: (a) 多文件批量传 fallback 走 `tar + base64 over ssh stdin` 比逐文件 base64 更省时;(b) **paramiko `ssh exec` 启动后台 daemon 必须用 `setsid bash -c '...' < /dev/null > /dev/null 2>&1`**,否则 `recv_exit_status()` 会一直挂(channel 不干净退出)。任何在 ssh 内启动 ez_router 做集成测试的脚本要遵守这条。
 
+**v8 补丁**: ssh exec 启动 daemon 后用 `pgrep -f "<cmdline>"` 拿 PID 时**必须 `| tail -1`,不是 `head -1`**。`setsid bash -c '...'` 会先创建一个父 bash 包装进程,真实 daemon 是它的子进程;按 PID 排序父在前子在后,`head -1` 拿到的是父 bash(干掉它子进程不会停),`tail -1` 拿到的才是真 daemon。阶段 2 D-1 smoke 编排时踩到。
+
 ---
 
 ## 协议层契约(v6 新增,阶段 1 C-1 落地)
@@ -90,3 +92,5 @@
 **23.[LM_7]** **业务层边界可以比协议层更紧,但不可超过**。例: `parse_register_json` 的 4096 字节 ≤ `PROTO_MAX_PAYLOAD = 65536`。**Why**: 协议层 limit 是"传输层 DoS 防御"(避免恶意客户端宣称巨 payload 让接收方分配巨 buffer),业务层 limit 是"业务语义合理性"(REGISTER 帧 4 KiB JSON 已绰绰有余,更大代表客户端有问题)。两层都需要,且业务层必须更紧。**How to apply**: 后续 cmd 实现时(LOG / FW_CHUNK / DATA),各自内部应有业务上限,且 ≤ `PROTO_MAX_PAYLOAD`;不要图省事直接信任协议层 limit。
 
 **24.[LM_7]** **契约 14 的延伸:`dispatcher` / IPC 线程的 `write()` 也不可阻塞**。reactor 是最严的不可阻塞线程,但 IPC 线程虽然不喂 watchdog,仍是新连接 dispatch 的瓶颈;阻塞 `write()` 写慢客户端会让其他客户端的 REGISTER / HEARTBEAT 排队延迟。**Why**: C-2 当前 `proto_dispatcher::send_register_ack` 用阻塞 `write()`,文件头有 TODO 注释 — 这是已知的延伸违规,**阶段 2 supervisor 上线前必须修**(改非阻塞 socket + 写队列 / EAGAIN 处理)。**How to apply**: 阶段 2 第一项任务 = 把所有 IPC 写路径(ACK / 命令下发 / supervisor 主动通知)改非阻塞 + 上层重试或降级。
+
+**v8 实现说明**(阶段 2 任务 2.0 落地,commit `c4408a7`): IPC 写非阻塞**用 `send(MSG_DONTWAIT | MSG_NOSIGNAL)` per-call,不是 `fcntl(fd, F_SETFL, O_NONBLOCK)`**。理由: `fcntl` 改 fd 属性是双向的 — recv 也会变非阻塞,IPC 线程的 `handle_client` 主循环会 busy loop。`MSG_DONTWAIT` 只对当次系统调用生效,保留 recv 阻塞语义不变。配合 EAGAIN 重试(8 次 × 1ms = 上限 8ms),短 ACK 一发即走,EAGAIN 8 次说明客户端真的拥塞 → 丢日志 + 后续 recv 自然识别断连。`MSG_NOSIGNAL` 防止对端先关时收到 SIGPIPE 把 daemon 干掉。**禁止**: 任何 IPC 写路径用 `fcntl O_NONBLOCK` + 普通 `write()` 的组合。

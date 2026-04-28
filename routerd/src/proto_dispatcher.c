@@ -7,15 +7,19 @@
 //   - DATA / CMD / LOG / FW_*  阶段 1 全部占位 LOG_*,不丢但也不处理
 //   - 未知 cmd 容错 LOG_WARN + return 0(不断连)
 //
-// 阻塞性: write(fd, ack) 是阻塞 socket;慢客户端会卡住调用线程(目前 IPC
-// 线程,不影响 reactor)。这违反契约 14 的精神(reactor 不可阻塞)。
-// TODO: 阶段 2 改非阻塞 fd + 写队列,或在 IPC 线程独立维护 outbox。
+// 阻塞性(RPD 阶段 2 任务 2.0 / PROJECT_CONTEXT 契约 24):
+//   ACK write 用 send(MSG_DONTWAIT) per-call 非阻塞 + EAGAIN 短暂重试,
+//   不修改 fd 的 O_NONBLOCK 属性(避免影响 recv 路径)。慢客户端 ACK
+//   写不出(8 次 × 1ms 仍 EAGAIN)→ 丢 ACK + ERROR 日志,不阻塞 IPC 线程。
+//   ACK 33 字节,正常一发即走;触发重试已是异常。
 //
-// 测试: tests/unit/test_dispatcher.c
+// 测试: tests/unit/test_dispatcher.c + tests/unit/test_ipc_write.c
 
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
+#include <sys/socket.h>
 #include "proto_dispatcher.h"
 #include "registry.h"
 #include "log.h"
@@ -29,7 +33,42 @@ static int build_register_ack_payload(int ok, char* buf, size_t cap)
     return n;
 }
 
-// 阻塞 write,慢客户端可能卡住。见文件头 TODO。
+// 非阻塞 send 短重试(8 次 × 1ms);超限丢 + ERROR。
+// 用 send(MSG_DONTWAIT) per-call 标记,不动 fd 属性(recv 仍阻塞)。
+// EAGAIN 重试上限 8 是经验值:33 字节 ACK 正常一发即走,需要 ≥1 次重试已是
+// 客户端慢得异常,继续等只会拖累 IPC 线程其他客户端。
+//
+// 返回总写入字节数(= len 全成功);失败返回 -1。
+static int send_nonblock_retry(int fd, const void* buf, size_t len)
+{
+    const uint8_t* p = (const uint8_t*)buf;
+    size_t sent = 0;
+    int retries = 0;
+    const int MAX_RETRIES = 8;
+
+    while (sent < len) {
+        ssize_t w = send(fd, p + sent, len - sent, MSG_DONTWAIT | MSG_NOSIGNAL);
+        if (w > 0) {
+            sent += (size_t)w;
+            continue;
+        }
+        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (++retries > MAX_RETRIES) {
+                LOG_ERROR("[dispatch] write fd=%d EAGAIN x%d, drop %zu/%zu bytes\n",
+                          fd, retries, len - sent, len);
+                return -1;
+            }
+            usleep(1000);   // 1ms
+            continue;
+        }
+        if (w < 0 && errno == EINTR) continue;
+        // EPIPE / ECONNRESET / 其他 → 客户端断了
+        LOG_WARN("[dispatch] write fd=%d errno=%d\n", fd, errno);
+        return -1;
+    }
+    return (int)sent;
+}
+
 static int send_register_ack(int fd, uint32_t req_seq, int ok)
 {
     char pl[32];
@@ -49,11 +88,8 @@ static int send_register_ack(int fd, uint32_t req_seq, int ok)
         return -1;
     }
 
-    ssize_t w = write(fd, frame, (size_t)n);
-    if (w != n) {
-        LOG_WARN("[dispatch] write ACK partial: %zd/%d\n", w, n);
+    if (send_nonblock_retry(fd, frame, (size_t)n) < 0)
         return -1;
-    }
     return 0;
 }
 

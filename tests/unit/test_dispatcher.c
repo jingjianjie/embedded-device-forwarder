@@ -8,6 +8,10 @@
 // 用 socketpair 替代真 IPC fd:把 dispatcher 视作"在 fd 上写 ACK 的纯函数",
 // 单测从 socket 另一端读出 ACK 帧并 decode 校验。
 //
+// 阶段 2 任务 2.0 后:ACK 写路径切 send(MSG_DONTWAIT) + EAGAIN 重试。
+// test_register_dispatch_with_ack / test_register_fail_ack 隐式覆盖
+// 非阻塞 happy path(33B ACK 一次发完无 EAGAIN)。EAGAIN 真分支留 smoke。
+//
 // §6.5 TEST AS DOC 形态。Unity 单测脚手架(open-questions U1)就绪后迁移。
 //
 // 编译运行(从仓库根目录):
